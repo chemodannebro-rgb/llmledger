@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-only:
+    name: Core install (no extras) smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install core package only (no anomaly/dev extras)
+        run: pip install .
+      - name: Verify zero-dependency commands work without scikit-learn
+        run: |
+          llmledger schema
+          llmledger demo-data --out /tmp/demo.jsonl
+          llmledger report --log-file /tmp/demo.jsonl
+          llmledger detect --log-file /tmp/demo.jsonl
+
+  full:
+    name: Full install + tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # requires-python in pyproject.toml is ">=3.9"; test both ends of
+        # that range rather than every intermediate version.
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package with anomaly + dev extras
+        run: pip install -e ".[anomaly,dev]"
+      - name: Run tests
+        run: pytest tests/ -v
+      - name: Run pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit

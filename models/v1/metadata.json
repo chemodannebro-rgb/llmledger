@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "package_version": "0.1.0",
+  "created_at": "2026-07-03T14:53:06+00:00",
+  "n_examples": 210,
+  "model_sha256": "0b1fec6c3a9dac219d4231225efa5defc25ee02d34269fb869966a76b0d65228",
+  "reference_stats": {
+    "by_group": [
+      {
+        "key": [
+          "retrieval",
+          "gpt-4o-mini"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 807,
+            "mad": 122,
+            "n": 39
+          },
+          "output_tokens": {
+            "median": 153,
+            "mad": 33,
+            "n": 39
+          },
+          "cost_micros": {
+            "median": 208,
+            "mad": 20,
+            "n": 39
+          }
+        }
+      },
+      {
+        "key": [
+          "tool-call",
+          "claude-haiku-3.5"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 858,
+            "mad": 103,
+            "n": 49
+          },
+          "output_tokens": {
+            "median": 136,
+            "mad": 17,
+            "n": 49
+          },
+          "cost_micros": {
+            "median": 1239,
+            "mad": 135,
+            "n": 49
+          }
+        }
+      },
+      {
+        "key": [
+          "summarize",
+          "gpt-4o"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 818,
+            "mad": 96,
+            "n": 37
+          },
+          "output_tokens": {
+            "median": 155,
+            "mad": 22,
+            "n": 37
+          },
+          "cost_micros": {
+            "median": 3640,
+            "mad": 362,
+            "n": 37
+          }
+        }
+      },
+      {
+        "key": [
+          "chat",
+          "claude-sonnet-4"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 752.0,
+            "mad": 133.5,
+            "n": 44
+          },
+          "output_tokens": {
+            "median": 163.0,
+            "mad": 38.0,
+            "n": 44
+          },
+          "cost_micros": {
+            "median": 4645.5,
+            "mad": 643.5,
+            "n": 44
+          }
+        }
+      },
+      {
+        "key": [
+          "summarize",
+          "gpt-4o-mini"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 827,
+            "mad": 71,
+            "n": 41
+          },
+          "output_tokens": {
+            "median": 149,
+            "mad": 34,
+            "n": 41
+          },
+          "cost_micros": {
+            "median": 211,
+            "mad": 27,
+            "n": 41
+          }
+        }
+      }
+    ],
+    "by_model": [
+      {
+        "key": [
+          null,
+          "gpt-4o-mini"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 809.0,
+            "mad": 87.0,
+            "n": 80
+          },
+          "output_tokens": {
+            "median": 150.5,
+            "mad": 33.0,
+            "n": 80
+          },
+          "cost_micros": {
+            "median": 208.5,
+            "mad": 21.0,
+            "n": 80
+          }
+        }
+      },
+      {
+        "key": [
+          null,
+          "claude-haiku-3.5"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 858,
+            "mad": 103,
+            "n": 49
+          },
+          "output_tokens": {
+            "median": 136,
+            "mad": 17,
+            "n": 49
+          },
+          "cost_micros": {
+            "median": 1239,
+            "mad": 135,
+            "n": 49
+          }
+        }
+      },
+      {
+        "key": [
+          null,
+          "gpt-4o"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 818,
+            "mad": 96,
+            "n": 37
+          },
+          "output_tokens": {
+            "median": 155,
+            "mad": 22,
+            "n": 37
+          },
+          "cost_micros": {
+            "median": 3640,
+            "mad": 362,
+            "n": 37
+          }
+        }
+      },
+      {
+        "key": [
+          null,
+          "claude-sonnet-4"
+        ],
+        "features": {
+          "input_tokens": {
+            "median": 752.0,
+            "mad": 133.5,
+            "n": 44
+          },
+          "output_tokens": {
+            "median": 163.0,
+            "mad": 38.0,
+            "n": 44
+          },
+          "cost_micros": {
+            "median": 4645.5,
+            "mad": 643.5,
+            "n": 44
+          }
+        }
+      }
+    ]
+  }
+}

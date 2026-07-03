@@ -1,0 +1,83 @@
+"""End-to-end walkthrough: CostTracker -> demo data -> baseline detection ->
+ML training -> ML-assisted detection.
+
+Everything through step 3 (baseline detection) works with only the core
+package installed. Steps 4-5 require the optional ML extra:
+
+    pip install "llmledger[anomaly]"
+
+If scikit-learn isn't installed, this script still runs to completion --
+it just skips the ML steps and explains how to enable them, the same way
+`llmledger detect` degrades gracefully when no trained model is available.
+
+    python examples/full_pipeline.py
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from llmledger.anomaly.baseline import analyze, format_score
+from llmledger.demo_data import write_demo_log
+from llmledger.logreader import iter_log_records
+
+
+def main() -> None:
+    work_dir = Path(tempfile.mkdtemp(prefix="llmledger-pipeline-"))
+    log_file = work_dir / "calls.jsonl"
+    model_dir = work_dir / "models"
+
+    # 1. Generate a synthetic log via a real CostTracker (same code path as
+    #    `llmledger demo-data`): 200 normal calls plus 10 injected outliers.
+    write_demo_log(log_file, n_normal=200, n_anomalies=10)
+    records = list(iter_log_records(log_file))
+    print(f"logged {len(records)} demo call(s) to {log_file}")
+
+    # 2. Baseline detection: robust (median/MAD) z-score against each call's
+    #    own (label, model) history. No dependencies beyond the standard
+    #    library -- this always works.
+    analyses = analyze(records)
+    anomalous = [(i, a) for i, a in enumerate(analyses) if a.is_anomaly]
+    print(f"\nbaseline: {len(anomalous)} anomalous call(s) found")
+    for i, a in anomalous[:3]:
+        print(f"  - [{i}] {a.record['label']} / {a.record['model']}")
+        for score in a.scores:
+            if score.is_anomalous:
+                print(f"      {format_score(score)}")
+
+    # 3. Train an IsolationForest as a second, ML-based opinion. This is the
+    #    one part of llmledger that needs scikit-learn, so the import is
+    #    deliberately deferred to here and guarded -- the rest of this
+    #    script (and the rest of the package) never imports it at module
+    #    level.
+    try:
+        from llmledger.anomaly.train import train
+    except ImportError:
+        print(
+            '\nscikit-learn not installed; skipping ML training/detection. '
+            'Install with: pip install "llmledger[anomaly]"'
+        )
+        return
+
+    version_dir = train(records, model_dir=model_dir)
+    print(f"\ntrained model saved to {version_dir}")
+
+    # 4. Load the trained model back and cross-check the same log with it.
+    from llmledger.anomaly.features import extract_features
+    from llmledger.anomaly.registry import load_model
+
+    model, metadata = load_model(version_dir)
+    X, kept_indices = extract_features(records)
+    predictions = model.predict(X)
+    ml_flagged = [kept_indices[i] for i, pred in enumerate(predictions) if pred == -1]
+
+    print(
+        f"ML cross-check (model v{metadata['version']}, "
+        f"trained on {metadata['n_examples']} example(s)): "
+        f"{len(ml_flagged)} call(s) flagged"
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,12 @@
+{
+  "last_updated": "2026-06-01",
+  "models": {
+    "gpt-4o": { "input_per_1m": 2.5, "output_per_1m": 10.0, "cached_input_per_1m": 1.25 },
+    "gpt-4o-mini": { "input_per_1m": 0.15, "output_per_1m": 0.6, "cached_input_per_1m": 0.075 },
+    "o1": { "input_per_1m": 15.0, "output_per_1m": 60.0, "cached_input_per_1m": 7.5 },
+    "o3-mini": { "input_per_1m": 1.1, "output_per_1m": 4.4, "cached_input_per_1m": 0.55 },
+    "claude-sonnet-4": { "input_per_1m": 3.0, "output_per_1m": 15.0, "cached_input_per_1m": 0.3 },
+    "claude-opus-4": { "input_per_1m": 15.0, "output_per_1m": 75.0, "cached_input_per_1m": 1.5 },
+    "claude-haiku-3.5": { "input_per_1m": 0.8, "output_per_1m": 4.0, "cached_input_per_1m": 0.08 }
+  }
+}
