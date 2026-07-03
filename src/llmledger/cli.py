@@ -108,9 +108,13 @@ def cmd_demo_data(args: argparse.Namespace) -> int:
 
 def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
     """Return an ML cross-check summary, or `None` if no trained model
-    exists yet at `model_dir`. Never raises: missing scikit-learn or a
-    corrupted model file are reported through `warn()`/`error()` and
-    reflected in the returned dict's `available` flag instead.
+    exists yet at `model_dir`. Never raises: missing scikit-learn, a
+    corrupted/tampered `model.pkl` (sha256 mismatch), or a missing/corrupted
+    `metadata.json` (e.g. an interrupted `train()`, or manual tampering) are
+    all reported through `warn()`/`error()` and reflected in the returned
+    dict's `available` flag instead of aborting `detect` entirely -- the
+    baseline result is still valid and should still be printed even when the
+    ML side of the registry is unusable.
     """
     version_dir = latest_version_dir(model_dir)
     if version_dir is None:
@@ -127,6 +131,12 @@ def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
         return {"available": False, "reason": "scikit-learn not installed"}
     except ValueError as exc:
         error(str(exc))
+        return {"available": False, "reason": str(exc)}
+    except (OSError, json.JSONDecodeError) as exc:
+        error(
+            f"could not load model registry at {version_dir}: {exc}. "
+            "Skipping ML cross-check; re-run `llmledger train` to regenerate it."
+        )
         return {"available": False, "reason": str(exc)}
 
     X, kept_indices = extract_features(records)

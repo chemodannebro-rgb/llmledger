@@ -9,8 +9,11 @@ leaves the machine.
 
 ## Quickstart
 
+Not published to PyPI (portfolio project) — install from a local clone:
+
 ```bash
-pip install llmledger
+git clone <this-repo> && cd llmledger
+pip install -e .
 ```
 
 ```python
@@ -36,8 +39,8 @@ read yourself.
 ## Installation
 
 ```bash
-pip install llmledger                  # core only: report, demo-data, detect (baseline), schema
-pip install "llmledger[anomaly]"       # + train (IsolationForest, requires scikit-learn)
+pip install -e .                       # core only: report, demo-data, detect (baseline), schema
+pip install -e ".[anomaly]"            # + train (IsolationForest, requires scikit-learn)
 ```
 
 ## CLI

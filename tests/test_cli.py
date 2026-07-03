@@ -171,6 +171,29 @@ def test_train_then_detect_uses_trained_model(tmp_path, capsys):
     assert payload["ml"]["anomaly_count"] > 0
 
 
+def test_detect_survives_missing_metadata_json_and_still_reports_baseline(tmp_path, capsys):
+    # A corrupted/missing metadata.json (as opposed to a corrupted model.pkl,
+    # already covered by test_registry.py's sha256 check) must not take down
+    # the whole `detect` command -- baseline results are still valid and
+    # should still be printed, with ML simply marked unavailable.
+    pytest.importorskip("sklearn")
+    log_path = _demo_log(tmp_path, n_normal=200, n_anomalies=10)
+    model_dir = tmp_path / "models"
+    main(["train", "--log-file", str(log_path), "--model-dir", str(model_dir)])
+    capsys.readouterr()
+
+    (model_dir / "v1" / "metadata.json").unlink()
+
+    exit_code = main(["detect", "--log-file", str(log_path), "--model-dir", str(model_dir), "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["anomaly_count"] > 0  # baseline result still computed and reported
+    assert payload["ml"]["available"] is False
+    assert "[llmledger] error:" in captured.err
+
+
 def test_train_command_missing_sklearn_returns_exit_code_2(tmp_path, capsys, monkeypatch):
     monkeypatch.setitem(sys.modules, "llmledger.anomaly.train", None)
     log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
