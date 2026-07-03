@@ -23,8 +23,13 @@ jobs:
           # demo-data always injects synthetic anomalies, so `detect` finding
           # them (exit 1) is the *expected*, correct outcome here -- this
           # smoke test only cares that the command runs without crashing
-          # (exit 2) now that scikit-learn isn't installed.
-          llmledger detect --log-file /tmp/demo.jsonl; code=$?
+          # (exit 2) now that scikit-learn isn't installed. `set +e` is
+          # required here: this step runs under `bash -e`, which would
+          # otherwise abort on `detect`'s exit 1 before `code=$?` ever runs.
+          set +e
+          llmledger detect --log-file /tmp/demo.jsonl
+          code=$?
+          set -e
           if [ "$code" -eq 2 ]; then
             echo "detect crashed (exit 2) on a core-only install" >&2
             exit 1
