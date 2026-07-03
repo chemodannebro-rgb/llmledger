@@ -8,9 +8,10 @@ Five subcommands:
   schema     -- print the packaged JSONL log schema
 
 `report`/`demo-data`/`schema` never import scikit-learn. `detect` only
-imports it indirectly, via `registry.load_model` unpickling an existing
-model -- if none exists yet, `detect` runs baseline-only and never touches
-scikit-learn either. `train` imports `anomaly.train` (which imports
+imports it indirectly, via `registry.load_model` deserializing (via
+`skops.io`) an existing model -- if none exists yet, `detect` runs
+baseline-only and never touches scikit-learn either. `train` imports
+`anomaly.train` (which imports
 scikit-learn at module level) lazily, inside a try/except, so the
 zero-dependency core guarantee holds for every other command even when
 scikit-learn is not installed.
@@ -61,6 +62,13 @@ def _load_pricing_file(path: str) -> dict:
         return json.load(fh)
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, got {value!r}")
+    return parsed
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         records = list(iter_log_records(args.log_file))
@@ -80,7 +88,11 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 0
 
     print(f"calls: {result['call_count']}")
-    print(f"total cost: ${result['total_cost_usd']:.6f}")
+    total_cost_line = f"total cost: ${result['total_cost_usd']:.6f}"
+    if args.rub_rate is not None:
+        rub_total = result["total_cost_usd"] * args.rub_rate
+        total_cost_line += f" (~₽{rub_total:.2f} at {args.rub_rate:.2f} ₽/$)"
+    print(total_cost_line)
     print("by label:")
     for label, micros in sorted(result["by_label_micros"].items()):
         print(f"  {label}: ${micros / 1_000_000:.6f}")
@@ -109,7 +121,7 @@ def cmd_demo_data(args: argparse.Namespace) -> int:
 def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
     """Return an ML cross-check summary, or `None` if no trained model
     exists yet at `model_dir`. Never raises: missing scikit-learn, a
-    corrupted/tampered `model.pkl` (sha256 mismatch), or a missing/corrupted
+    corrupted/tampered `model.skops` (sha256 mismatch), or a missing/corrupted
     `metadata.json` (e.g. an interrupted `train()`, or manual tampering) are
     all reported through `warn()`/`error()` and reflected in the returned
     dict's `available` flag instead of aborting `detect` entirely -- the
@@ -304,6 +316,13 @@ def build_parser() -> argparse.ArgumentParser:
     report_p.add_argument("--log-file", required=True)
     report_p.add_argument(
         "--pricing-file", default=None, help="Override pricing.json with a custom file"
+    )
+    report_p.add_argument(
+        "--rub-rate",
+        type=_positive_float,
+        default=None,
+        help="Also show total cost converted to RUB at this fixed, manually-supplied rate "
+        "(RUB per USD). No exchange rate is ever fetched over the network.",
     )
     report_p.set_defaults(handler=cmd_report)
 

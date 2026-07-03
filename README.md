@@ -38,22 +38,56 @@ llmledger report --log-file calls.jsonl
 That's the whole core: no scikit-learn, no database, one JSONL file you can
 read yourself.
 
+## SDK adapters
+
+If you're calling an SDK directly, `CostTracker` has an adapter per
+provider that reads usage straight off the response object (dict or
+attribute-style) — no need to add the provider's SDK as a dependency of
+`llmledger`, and no need to hand-map fields yourself:
+
+```python
+# OpenAI
+response = openai_client.chat.completions.create(...)
+tracker.log_openai_response(response, label="chat")
+
+# Anthropic
+response = anthropic_client.messages.create(...)
+tracker.log_anthropic_response(response, label="chat")
+
+# Gemini (google-genai)
+response = gemini_client.models.generate_content(...)
+tracker.log_gemini_response(response, label="chat")
+
+# Ollama — local models usually have no pricing.json entry, so pass cost=0.0
+# (or your own pricing=); only pass the final chunk if you're streaming.
+response = ollama_client.chat(...)
+tracker.log_ollama_response(response, label="chat", cost=0.0)
+```
+
+Each adapter accounts for that provider's own cache-token billing rules
+(subset vs. additive counters) so `cached_input_tokens` always means "billed
+at the cheaper cached rate", regardless of provider.
+
 ## Installation
 
 ```bash
 pip install -e .                       # core only: report, demo-data, detect (baseline), schema
-pip install -e ".[anomaly]"            # + train (IsolationForest, requires scikit-learn)
+pip install -e ".[anomaly]"            # + train (IsolationForest, requires scikit-learn and skops)
 ```
 
 ## CLI
 
 | Command | What it does | Exit code |
 |---|---|---|
-| `llmledger report --log-file <path>` | Cost summary (total, by label, by model) | `0` |
+| `llmledger report --log-file <path> [--rub-rate <rate>]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate | `0` |
 | `llmledger demo-data --out <path>` | Write a synthetic log with known injected anomalies | `0` |
 | `llmledger detect --log-file <path> [--model-dir <dir>] [--json]` | Baseline (+ ML if a trained model exists) anomaly detection | `0` clean, `1` anomalies found, `2` error |
 | `llmledger train --log-file <path> --model-dir <dir>` | Train an IsolationForest model (`[anomaly]` extra) | `0` / `2` error |
 | `llmledger schema` | Print the JSONL log schema (`schema.json`) | `0` |
+
+`--rub-rate` never fetches an exchange rate over the network — you supply
+the number yourself, e.g. `llmledger report --log-file calls.jsonl
+--rub-rate 90`.
 
 Exit codes are the entire integration contract — `llmledger` never sends
 notifications itself (no Slack/email/webhook integration, and no such

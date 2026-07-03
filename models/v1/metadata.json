@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "package_version": "0.1.0",
-  "created_at": "2026-07-03T14:53:06+00:00",
+  "package_version": "0.2.0",
+  "created_at": "2026-07-03T18:03:14+00:00",
   "n_examples": 210,
-  "model_sha256": "0b1fec6c3a9dac219d4231225efa5defc25ee02d34269fb869966a76b0d65228",
+  "model_sha256": "c2f890b5c0c5ab65c0049682daf3cd3c35f5afc859413b79db9bb8ec66de310c",
   "reference_stats": {
     "by_group": [
       {

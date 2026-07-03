@@ -20,7 +20,7 @@ def test_save_model_creates_v1_with_expected_files(tmp_path):
     )
 
     assert version_dir == model_dir / "v1"
-    assert (version_dir / "model.pkl").exists()
+    assert (version_dir / "model.skops").exists()
     assert (version_dir / "metadata.json").exists()
 
 
@@ -29,7 +29,7 @@ def test_saved_files_have_0600_permissions(tmp_path):
     version_dir = save_model(
         model_dir, {"fake": "model"}, n_examples=1, reference_stats={}
     )
-    for name in ("model.pkl", "metadata.json"):
+    for name in ("model.skops", "metadata.json"):
         mode = stat.S_IMODE(os.stat(version_dir / name).st_mode)
         assert mode == 0o600
 
@@ -125,7 +125,7 @@ def test_load_model_rejects_corrupted_model_file(tmp_path):
     model_dir = tmp_path / "models"
     version_dir = save_model(model_dir, {"x": 1}, n_examples=1, reference_stats={})
 
-    model_path = version_dir / "model.pkl"
+    model_path = version_dir / "model.skops"
     os.chmod(model_path, 0o600)
     with model_path.open("ab") as fh:
         fh.write(b"corruption")

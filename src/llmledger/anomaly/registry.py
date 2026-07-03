@@ -2,16 +2,20 @@
 model (`train.py` writes to it, `cli.py`'s `detect`/`train` read from it).
 
 Each version lives in `models/v{N}/`, containing:
-- `model.pkl` -- the pickled model (0600 permissions)
+- `model.skops` -- the model serialized via `skops.io` (0600 permissions)
 - `metadata.json` -- package version, creation timestamp, number of
-  training examples, sha256 of `model.pkl`, and reference statistics used
+  training examples, sha256 of `model.skops`, and reference statistics used
   to detect drift later (0600 permissions)
 
-Loading a model recomputes and checks the sha256 against `metadata.json`
-*before* unpickling. This does not eliminate the fundamental risk of
-`pickle.load` on untrusted input (that is not possible), but it does catch
-a corrupted or substituted model file, which is a real and useful
-integrity check. A warning is also printed reminding the caller to only
+Loading a model recomputes and checks the sha256 against `metadata.json`,
+then checks `skops.io.get_untrusted_types()` -- both *before* deserializing
+-- and refuses to load if either check fails. Unlike `pickle`, `skops`
+refuses by construction to construct any type outside an explicit trusted
+list, so a tampered or unexpected file is rejected at load time rather than
+silently executing arbitrary code. The sha256 check still matters
+separately: it catches corruption or substitution of a file that *is* made
+of otherwise-trusted types (e.g. a swapped-in `IsolationForest` trained on
+different data). A warning is also printed reminding the caller to only
 load models from a source they trust.
 """
 
@@ -20,7 +24,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import pickle
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,17 +76,19 @@ def save_model(
     reference_stats: dict,
     keep_last: int = KEEP_LAST_DEFAULT,
 ) -> Path:
-    """Pickle `model` into a newly allocated version directory, write its
-    metadata (including a sha256 integrity hash and reference statistics
-    for later drift detection), chmod both files 0600, and prune old
-    versions beyond `keep_last`. Returns the new version directory.
+    """Serialize `model` via `skops.io` into a newly allocated version
+    directory, write its metadata (including a sha256 integrity hash and
+    reference statistics for later drift detection), chmod both files
+    0600, and prune old versions beyond `keep_last`. Returns the new
+    version directory.
     """
+    import skops.io as sio
+
     model_dir = Path(model_dir)
     version, version_dir = _allocate_version_dir(model_dir)
 
-    model_path = version_dir / "model.pkl"
-    with model_path.open("wb") as fh:
-        pickle.dump(model, fh)
+    model_path = version_dir / "model.skops"
+    sio.dump(model, model_path)
     os.chmod(model_path, 0o600)
 
     model_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
@@ -124,14 +129,18 @@ def load_model(version_dir) -> tuple[Any, dict]:
 
     Raises `ValueError` if the model file's sha256 does not match the
     value recorded in `metadata.json` at save time (corruption or
-    substitution) -- this check happens before any unpickling. On
-    success, prints a warning reminding the caller to only load models
-    from a trusted source, plus a separate warning if the metadata's
-    `package_version` differs from the currently installed llmledger
-    version (feature engineering may have changed between versions).
+    substitution), or if `skops.io.get_untrusted_types()` reports any type
+    outside skops's default trusted list -- both checks happen before any
+    deserialization. On success, prints a warning reminding the caller to
+    only load models from a trusted source, plus a separate warning if the
+    metadata's `package_version` differs from the currently installed
+    llmledger version (feature engineering may have changed between
+    versions).
     """
+    import skops.io as sio
+
     version_dir = Path(version_dir)
-    model_path = version_dir / "model.pkl"
+    model_path = version_dir / "model.skops"
     metadata_path = version_dir / "metadata.json"
 
     with metadata_path.open("r", encoding="utf-8") as fh:
@@ -146,10 +155,21 @@ def load_model(version_dir) -> tuple[Any, dict]:
             "to load. Re-run `llmledger train` to regenerate it."
         )
 
+    untrusted_types = sio.get_untrusted_types(file=model_path)
+    if untrusted_types:
+        raise ValueError(
+            f"model file {model_path} contains untrusted type(s) "
+            f"{untrusted_types}; refusing to load. This should not happen "
+            "for a model produced by `llmledger train` -- it may indicate "
+            "tampering. Re-run `llmledger train` to regenerate it."
+        )
+
     warn(
         f"loading model from {version_dir}; only load models from a source "
-        "you trust (unpickling is not safe against untrusted/adversarial "
-        "input)."
+        "you trust. skops rejects any type outside its trusted-by-default "
+        "list, but a substituted file made of otherwise-trusted types "
+        "(e.g. a swapped-in model trained on different data) is only "
+        "caught by the sha256 check above, not by skops itself."
     )
 
     if metadata.get("package_version") != PACKAGE_VERSION:
@@ -159,7 +179,6 @@ def load_model(version_dir) -> tuple[Any, dict]:
             "may have changed. Consider running `llmledger train` again."
         )
 
-    with model_path.open("rb") as fh:
-        model = pickle.load(fh)
+    model = sio.load(model_path, trusted=[])
 
     return model, metadata

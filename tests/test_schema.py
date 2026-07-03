@@ -72,6 +72,27 @@ def test_log_anthropic_response_record_matches_schema(tmp_path, schema):
     jsonschema.validate(record, schema)
 
 
+def test_log_gemini_response_record_matches_schema(tmp_path, schema):
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {
+        "model_version": "gemini-1.5-pro",
+        "usage_metadata": {
+            "prompt_token_count": 1000,
+            "cached_content_token_count": 300,
+            "candidates_token_count": 200,
+        },
+    }
+    record = tracker.log_gemini_response(response, label="chat", cost=0.0)
+    jsonschema.validate(record, schema)
+
+
+def test_log_ollama_response_record_matches_schema(tmp_path, schema):
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {"model": "llama3", "prompt_eval_count": 50, "eval_count": 20}
+    record = tracker.log_ollama_response(response, label="chat", cost=0.0)
+    jsonschema.validate(record, schema)
+
+
 def test_record_missing_required_field_fails_schema(schema):
     record = {
         "schema_version": "1.0",

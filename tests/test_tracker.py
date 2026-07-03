@@ -214,3 +214,59 @@ def test_adapters_accept_attribute_style_sdk_objects(tmp_path):
     record = tracker.log_openai_response(response, label="chat")
     assert record["input_tokens"] == 100
     assert record["cached_input_tokens"] == 0
+
+
+def test_log_gemini_response_adapter_extracts_cached_tokens(tmp_path):
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {
+        "model_version": "gemini-1.5-pro",
+        "usage_metadata": {
+            "prompt_token_count": 1000,
+            "cached_content_token_count": 300,
+            "candidates_token_count": 200,
+        },
+    }
+    record = tracker.log_gemini_response(response, label="chat", cost=0.0)
+    assert record["input_tokens"] == 700
+    assert record["cached_input_tokens"] == 300
+    assert record["output_tokens"] == 200
+    assert record["model"] == "gemini-1.5-pro"
+
+
+def test_log_gemini_response_adapter_handles_missing_usage_metadata(tmp_path):
+    # usage_metadata can be entirely absent, e.g. a safety-filter-blocked response.
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {"model_version": "gemini-1.5-pro", "usage_metadata": None}
+    record = tracker.log_gemini_response(response, label="chat", cost=0.0)
+    assert record["input_tokens"] == 0
+    assert record["cached_input_tokens"] == 0
+    assert record["output_tokens"] == 0
+
+
+def test_log_gemini_response_adapter_prefers_explicit_model_over_model_version(tmp_path):
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {"model_version": "gemini-1.5-pro", "usage_metadata": {}}
+    record = tracker.log_gemini_response(
+        response, label="chat", model="gemini-2.0-flash", cost=0.0
+    )
+    assert record["model"] == "gemini-2.0-flash"
+
+
+def test_log_ollama_response_adapter_extracts_token_counts(tmp_path):
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {"model": "llama3", "prompt_eval_count": 50, "eval_count": 20}
+    record = tracker.log_ollama_response(response, label="chat", cost=0.0)
+    assert record["input_tokens"] == 50
+    assert record["output_tokens"] == 20
+    assert record["cached_input_tokens"] == 0
+    assert record["model"] == "llama3"
+
+
+def test_log_ollama_response_adapter_handles_missing_eval_count(tmp_path):
+    # An intermediate streaming chunk (done=False) lacks these counters entirely.
+    tracker = CostTracker(tmp_path / "calls.jsonl")
+    response = {"model": "llama3", "done": False}
+    record = tracker.log_ollama_response(response, label="chat", cost=0.0)
+    assert record["input_tokens"] == 0
+    assert record["output_tokens"] == 0
+    assert record["cached_input_tokens"] == 0

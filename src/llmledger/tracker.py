@@ -290,6 +290,82 @@ class CostTracker:
             **extra,
         )
 
+    def log_gemini_response(
+        self,
+        response: Any,
+        *,
+        label: str,
+        model: str | None = None,
+        trace_id: str | None = None,
+        **extra: Any,
+    ) -> dict:
+        """Adapter for a Gemini (`google-genai`) SDK response object (or an
+        equivalent dict). `usage_metadata` can be entirely absent -- e.g. when
+        the response was blocked by a safety filter -- `_get` handles that
+        `None` case the same way it handles a missing field. Like OpenAI,
+        `cached_content_token_count` is a *subset* of `prompt_token_count`
+        (not an additional count), so it is subtracted out of `input_tokens`
+        rather than added on top. `model` falls back to `response.model_version`
+        only when the caller doesn't pass one explicitly, since not every
+        client wrapper populates that field.
+        """
+        usage = _get(response, "usage_metadata")
+        prompt_tokens = _get(usage, "prompt_token_count", 0) or 0
+        cached_tokens = _get(usage, "cached_content_token_count", 0) or 0
+        input_tokens = max(prompt_tokens - cached_tokens, 0)
+        output_tokens = _get(usage, "candidates_token_count", 0) or 0
+        resolved_model = model or _get(response, "model_version")
+
+        return self.log_call(
+            label=label,
+            model=resolved_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached_tokens,
+            trace_id=trace_id,
+            **extra,
+        )
+
+    def log_ollama_response(
+        self,
+        response: Any,
+        *,
+        label: str,
+        model: str | None = None,
+        trace_id: str | None = None,
+        **extra: Any,
+    ) -> dict:
+        """Adapter for an Ollama response object (or an equivalent dict).
+        Ollama exposes `prompt_eval_count`/`eval_count` directly on the
+        response, not nested under a `usage` object, and does not track
+        cached/reused input tokens at all, so `cached_input_tokens` is always
+        0.
+
+        Two things to know before using this adapter:
+
+        - Local models typically have no entry in `pricing.json`; pass
+          `cost=0.0` (or your own `pricing=`) to `log_call`/this adapter's
+          underlying cost resolution, otherwise it raises `ValueError` for an
+          unpriced model -- this is expected, not a bug.
+        - When calling Ollama with `stream=True`, only the final chunk (the
+          one with `done: true`) carries `prompt_eval_count`/`eval_count`;
+          intermediate chunks don't have them. Pass that final chunk here, not
+          the intermediate ones.
+        """
+        input_tokens = _get(response, "prompt_eval_count", 0) or 0
+        output_tokens = _get(response, "eval_count", 0) or 0
+        resolved_model = model or _get(response, "model")
+
+        return self.log_call(
+            label=label,
+            model=resolved_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=0,
+            trace_id=trace_id,
+            **extra,
+        )
+
     def _read_records(self):
         return iter_log_records(self._read_path)
 

@@ -48,9 +48,10 @@ def main() -> None:
         cost=0.008,
     )
 
-    # If you're calling the OpenAI/Anthropic SDKs directly, log_openai_response()/
-    # log_anthropic_response() extract usage (including cache fields) straight
-    # from the SDK's response object -- no need to add openai/anthropic as a
+    # If you're calling the OpenAI/Anthropic/Gemini/Ollama SDKs directly, the
+    # matching log_*_response() adapter extracts usage (including cache
+    # fields, where the provider has them) straight from the SDK's response
+    # object -- no need to add openai/anthropic/google-genai/ollama as a
     # dependency of llmledger, or to hand-map fields yourself:
     #
     #   response = openai_client.chat.completions.create(...)
@@ -58,6 +59,12 @@ def main() -> None:
     #
     #   response = anthropic_client.messages.create(...)
     #   tracker.log_anthropic_response(response, label="chat")
+    #
+    #   response = gemini_client.models.generate_content(...)
+    #   tracker.log_gemini_response(response, label="chat")
+    #
+    #   response = ollama_client.chat(...)  # pass the final chunk if streaming
+    #   tracker.log_ollama_response(response, label="chat", cost=0.0)  # local model: no pricing.json entry
 
     report = tracker.report()
     print(f"log file: {log_file}")

@@ -57,6 +57,51 @@ def test_report_command_prints_disclaimer_and_totals(tmp_path, capsys):
     assert "total cost:" in captured.out
 
 
+def test_report_command_prints_rub_conversion_when_rate_given(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["report", "--log-file", str(log_path), "--rub-rate", "90"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "total cost: $" in captured.out
+    assert "~₽" in captured.out
+    assert "90.00 ₽/$" in captured.out
+
+
+def test_report_command_without_rub_rate_omits_rub_conversion(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["report", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "₽" not in captured.out
+
+
+def test_report_rub_rate_rejects_non_positive_value(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["report", "--log-file", str(log_path), "--rub-rate", "-5"])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "must be a positive number" in captured.err
+
+
+def test_report_empty_log_with_rub_rate_shows_no_records(tmp_path, capsys):
+    log_path = tmp_path / "empty.jsonl"
+    log_path.write_text("")
+
+    exit_code = main(["report", "--log-file", str(log_path), "--rub-rate", "90"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "no records found" in captured.out
+    assert "₽" not in captured.out
+
+
 def test_report_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     missing = tmp_path / "does-not-exist.jsonl"
     exit_code = main(["report", "--log-file", str(missing)])
@@ -159,7 +204,7 @@ def test_train_then_detect_uses_trained_model(tmp_path, capsys):
     train_out = capsys.readouterr().out
     assert train_exit == 0
     assert "trained model saved to" in train_out
-    assert (model_dir / "v1" / "model.pkl").exists()
+    assert (model_dir / "v1" / "model.skops").exists()
 
     detect_exit = main(
         ["detect", "--log-file", str(log_path), "--model-dir", str(model_dir), "--json"]
@@ -172,7 +217,7 @@ def test_train_then_detect_uses_trained_model(tmp_path, capsys):
 
 
 def test_detect_survives_missing_metadata_json_and_still_reports_baseline(tmp_path, capsys):
-    # A corrupted/missing metadata.json (as opposed to a corrupted model.pkl,
+    # A corrupted/missing metadata.json (as opposed to a corrupted model.skops,
     # already covered by test_registry.py's sha256 check) must not take down
     # the whole `detect` command -- baseline results are still valid and
     # should still be printed, with ML simply marked unavailable.

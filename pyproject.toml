@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmledger"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local, zero-dependency cost tracking and anomaly detection for LLM/agent calls"
 readme = "README.md"
 license = { text = "MIT" }
@@ -18,7 +18,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-anomaly = ["scikit-learn>=1.3,<2.0"]
+anomaly = ["scikit-learn>=1.3,<2.0", "skops>=0.13,<1.0"]
 dev = ["pytest>=7.4", "jsonschema>=4.0"]
 
 [project.scripts]
