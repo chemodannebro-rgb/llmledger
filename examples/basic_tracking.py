@@ -74,6 +74,16 @@ def main() -> None:
     for label, micros in sorted(report["by_label_micros"].items()):
         print(f"  {label}: ${micros / 1_000_000:.6f}")
 
+    # From the CLI, the same log can be summarized (optionally scoped to a
+    # date range with --since/--until, both YYYY-MM-DD, inclusive) or turned
+    # into a static HTML dashboard -- see examples/full_pipeline.py for the
+    # dashboard call made directly from Python:
+    #
+    #   llmledger report --log-file {log_file} --since 2026-01-01 --until 2026-01-31
+    #   llmledger dashboard --log-file {log_file} --out dashboard.html
+    print(f"\ntry: llmledger report --log-file {log_file}")
+    print(f"try: llmledger dashboard --log-file {log_file} --out dashboard.html")
+
 
 if __name__ == "__main__":
     main()

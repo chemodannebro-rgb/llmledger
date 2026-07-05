@@ -27,6 +27,24 @@ def load_default_pricing() -> dict:
         return json.load(fh)
 
 
+def merge_pricing_overrides(base: dict, overrides: dict[str, dict]) -> dict:
+    """Return a new pricing dict: `base` (e.g. `load_default_pricing()`)
+    with each `overrides[model]` rate dict layered on top of `base`'s
+    `models` map, one model at a time.
+
+    This is the "point override" path for a new/unlisted model or a
+    custom negotiated rate: without it, adding one model's rate requires
+    hand-copying the *entire* pricing file (all other built-in models)
+    into a custom file/dict just to add one entry, since passing a whole
+    replacement dict to `CostTracker(pricing=...)` discards every model
+    `base` doesn't repeat. `base` itself is never mutated.
+    """
+    merged_models = dict(base.get("models", {}))
+    for model, rates in overrides.items():
+        merged_models[model] = rates
+    return {**base, "models": merged_models}
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -61,10 +79,30 @@ class CostTracker:
         log_file,
         *,
         pricing: dict | None = None,
+        pricing_overrides: dict[str, dict] | None = None,
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
     ) -> None:
-        self.pricing = pricing if pricing is not None else load_default_pricing()
+        """`pricing`, if given, replaces the built-in `pricing.json` entirely
+        (you're responsible for every model you'll log against). For adding
+        or overriding just one or two models on top of the built-in rates
+        (e.g. a new/unlisted model, or a custom negotiated rate) without
+        hand-copying the whole file, pass `pricing_overrides` instead, e.g.
+        `pricing_overrides={"my-model": {"input_per_1m": 3.0, "output_per_1m": 9.0}}`
+        -- every other built-in model keeps working unchanged. Passing both
+        is an error: `pricing` already fully determines the rate table, so
+        layering `pricing_overrides` on top of an explicit `pricing` would
+        silently ignore whichever one the caller didn't expect to lose.
+        """
+        if pricing is not None and pricing_overrides is not None:
+            raise ValueError(
+                "pass either pricing= (full replacement) or pricing_overrides= "
+                "(point overrides on top of the built-in pricing.json), not both"
+            )
+        if pricing_overrides is not None:
+            self.pricing = merge_pricing_overrides(load_default_pricing(), pricing_overrides)
+        else:
+            self.pricing = pricing if pricing is not None else load_default_pricing()
         self._read_path = Path(log_file)
         self._write_path = self._resolve_write_path(self._read_path)
 

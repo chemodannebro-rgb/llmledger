@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.0] - 2026-07-05
+
+### Added
+- `llmledger validate --log-file <path> [--json]`: checks every record
+  against the packaged `schema.json` (required fields, types including
+  `["string", "null"]` unions, `minLength`, `minimum`,
+  `additionalProperties: false`). Implemented as a small, dependency-free
+  validator (`validation.py`) rather than importing the `[dev]`-only
+  `jsonschema` package, so `validate` stays a core, zero-dependency
+  command like `report`/`demo-data`/`schema`/`dashboard`. Exit `0` clean,
+  `1` invalid records found, `2` error.
+- `report --format csv`: prints a normalized 3-column CSV
+  (`dimension,key,cost_usd` — one `total` row, then one row per label,
+  then one row per model), meant to be piped into a spreadsheet or
+  another program. Mutually exclusive with `--json`.
+- `CostTracker(pricing_overrides={...})`: point overrides for individual
+  model rates, merged on top of the packaged `pricing.json` defaults via
+  the new `merge_pricing_overrides()` helper — no need to hand-copy the
+  whole pricing file to add or correct one model. Mutually exclusive
+  with the existing `pricing=` (full-replacement) kwarg.
+- `ARCHITECTURE.md`: documents the zero-dependency-core /
+  extras-only (`[anomaly]`, `[dev]`) rule as an explicit, citable policy
+  instead of prose scattered across README sections and independently
+  rediscovered in backlog notes.
+- `PRICING_CHANGELOG.md`: records what actually changed between
+  `pricing.json` snapshots (not just its `last_updated` date), so a
+  changed historical `report` total can be traced back to a specific
+  pricing update.
+- `CONTRIBUTING.md`: setup, test-running, what a PR needs (tests,
+  docs, no accidental new dependencies), and the dashboard
+  screenshot-required-for-CSS-changes rule.
+- README: explicit ICP line ("Built for: ...") clarifying the primary
+  use case (a solo developer shipping an LLM-powered feature) versus the
+  secondary one (a small team via directory mode).
+
+### Fixed
+- `examples/full_pipeline.py` no longer breaks on the `train()` signature
+  change from v0.5.0 (`train()` returns `(version_dir, eval_metrics)`);
+  the example previously did `version_dir = train(...)` without
+  unpacking, silently broken since examples aren't covered by pytest.
+  The example now also demonstrates `dashboard`/`filter_by_period`/
+  `parse_date`, and `basic_tracking.py` now points readers at `report`/
+  `dashboard` CLI usage — both were written before those commands
+  existed.
+
 ## [0.5.0] - 2026-07-05
 
 ### Added

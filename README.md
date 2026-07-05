@@ -9,6 +9,11 @@ Local, zero-dependency cost tracking and statistical anomaly detection for
 LLM/agent calls. Logs go to a plain JSONL file on your own disk; nothing
 leaves the machine.
 
+**Built for:** a solo developer shipping their own LLM-powered feature who
+wants cost/anomaly visibility without standing up a full observability
+platform — whether that's a single JSONL file on one machine, or a small
+team's calls merged from multiple processes via directory mode.
+
 A `dashboard` command also turns that log into a single static HTML file
 (no JS, no external services) — see the CLI table below. It's due for a
 redesign, so no screenshot here yet.
@@ -72,6 +77,20 @@ Each adapter accounts for that provider's own cache-token billing rules
 (subset vs. additive counters) so `cached_input_tokens` always means "billed
 at the cheaper cached rate", regardless of provider.
 
+If the packaged `pricing.json` is missing a model or has a stale rate, pass
+point overrides instead of hand-copying the whole file:
+
+```python
+tracker = CostTracker(
+    "calls.jsonl",
+    pricing_overrides={"my-model": {"input_per_1m": 3.0, "output_per_1m": 9.0}},
+)
+```
+
+`pricing_overrides` is merged on top of the packaged defaults (everything
+else stays as shipped); pass `pricing=` instead if you want to replace the
+whole pricing table — the two are mutually exclusive.
+
 ## Installation
 
 ```bash
@@ -83,11 +102,12 @@ pip install -e ".[anomaly]"            # + train (IsolationForest, requires scik
 
 | Command | What it does | Exit code |
 |---|---|---|
-| `llmledger report --log-file <path> [--rub-rate <rate>] [--since <date>] [--until <date>] [--trace-id <id>] [--json]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate; `--trace-id` narrows to one request's calls; `--json` prints a machine-readable summary instead | `0` |
+| `llmledger report --log-file <path> [--rub-rate <rate>] [--since <date>] [--until <date>] [--trace-id <id>] [--json \| --format csv]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate; `--trace-id` narrows to one request's calls; `--json` prints a machine-readable summary, `--format csv` prints a normalized 3-column CSV (`dimension,key,cost_usd`) instead — the two are mutually exclusive | `0` |
 | `llmledger demo-data --out <path>` | Write a synthetic log with known injected anomalies | `0` |
 | `llmledger detect --log-file <path> [--model-dir <dir>] [--json]` | Baseline (+ ML if a trained model exists) anomaly detection | `0` clean, `1` anomalies found, `2` error |
 | `llmledger train --log-file <path> --model-dir <dir>` | Train an IsolationForest model (`[anomaly]` extra) | `0` / `2` error |
 | `llmledger schema` | Print the JSONL log schema (`schema.json`) | `0` |
+| `llmledger validate --log-file <path> [--json]` | Check every record against the packaged schema (required fields, types, `minLength`/`minimum`, no unexpected fields) — dependency-free, doesn't use `jsonschema` | `0` clean, `1` invalid records found, `2` error |
 | `llmledger dashboard --log-file <path> --out <path.html> [--rub-rate <rate>] [--since <date>] [--until <date>]` | Static single-file HTML report with a daily journal | `0` / `2` error |
 
 `--rub-rate` never fetches an exchange rate over the network — you supply
@@ -185,7 +205,10 @@ patches `socket.socket` to raise if any core command tries to open one.
 See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary
 and how to report a vulnerability.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for version history.
+See [`CHANGELOG.md`](CHANGELOG.md) for version history and
+[`PRICING_CHANGELOG.md`](PRICING_CHANGELOG.md) for `pricing.json`'s own
+history. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for why the core package
+has zero dependencies and how the `[anomaly]`/`[dev]` extras are split out.
 
 ## Development
 
@@ -193,3 +216,6 @@ See [`CHANGELOG.md`](CHANGELOG.md) for version history.
 pip install -e ".[anomaly,dev]"
 pytest tests/ -v
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for what a PR needs (tests,
+docs, the dashboard screenshot rule).

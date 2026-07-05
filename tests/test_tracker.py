@@ -7,7 +7,7 @@ import stat
 import pytest
 
 from llmledger.logreader import iter_log_records
-from llmledger.tracker import CostTracker
+from llmledger.tracker import CostTracker, load_default_pricing, merge_pricing_overrides
 
 
 def test_log_call_basic_and_report(tmp_path):
@@ -72,6 +72,50 @@ def test_log_call_pricing_override(tmp_path):
         pricing={"input_per_1m": 1.0, "output_per_1m": 2.0},
     )
     assert record["cost_micros"] == 1_000_000
+
+
+def test_merge_pricing_overrides_adds_new_model_without_dropping_existing(tmp_path):
+    base = load_default_pricing()
+    merged = merge_pricing_overrides(
+        base, {"my-custom-model": {"input_per_1m": 3.0, "output_per_1m": 9.0}}
+    )
+
+    assert "my-custom-model" in merged["models"]
+    assert merged["models"]["gpt-4o"] == base["models"]["gpt-4o"]
+    assert "my-custom-model" not in base["models"], "base dict must not be mutated"
+
+
+def test_merge_pricing_overrides_replaces_existing_model_rate(tmp_path):
+    base = load_default_pricing()
+    merged = merge_pricing_overrides(
+        base, {"gpt-4o": {"input_per_1m": 1.0, "output_per_1m": 1.0}}
+    )
+
+    assert merged["models"]["gpt-4o"] == {"input_per_1m": 1.0, "output_per_1m": 1.0}
+
+
+def test_cost_tracker_pricing_overrides_lets_new_model_be_logged(tmp_path):
+    tracker = CostTracker(
+        tmp_path / "calls.jsonl",
+        pricing_overrides={"my-custom-model": {"input_per_1m": 1.0, "output_per_1m": 2.0}},
+    )
+    record = tracker.log_call(
+        label="x", model="my-custom-model", input_tokens=1_000_000, output_tokens=0
+    )
+    assert record["cost_micros"] == 1_000_000
+
+    # Built-in models still resolve normally alongside the override.
+    record2 = tracker.log_call(label="x", model="gpt-4o", input_tokens=1_000_000, output_tokens=0)
+    assert record2["cost_micros"] > 0
+
+
+def test_cost_tracker_rejects_pricing_and_pricing_overrides_together(tmp_path):
+    with pytest.raises(ValueError, match="either pricing="):
+        CostTracker(
+            tmp_path / "calls.jsonl",
+            pricing=load_default_pricing(),
+            pricing_overrides={"x": {"input_per_1m": 1.0, "output_per_1m": 1.0}},
+        )
 
 
 def test_log_file_created_with_0600_permissions(tmp_path):

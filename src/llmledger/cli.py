@@ -1,18 +1,19 @@
 """Command-line interface for llmledger.
 
-Six subcommands:
+Seven subcommands:
   report     -- cost summary read back from a log
   demo-data  -- write a synthetic log with a known number of injected anomalies
   detect     -- baseline (+ optional ML cross-check) anomaly detection over a log
   train      -- train an IsolationForest model (requires `llmledger[anomaly]`)
   schema     -- print the packaged JSONL log schema
+  validate   -- check a log's records against the packaged JSON schema
   dashboard  -- write a static single-file HTML cost report with a daily journal
 
-`report`/`demo-data`/`schema`/`dashboard` never import scikit-learn. `detect`
-only imports it indirectly, via `registry.load_model` deserializing (via
-`skops.io`) an existing model -- if none exists yet, `detect` runs
-baseline-only and never touches scikit-learn either. `train` imports
-`anomaly.train` (which imports
+`report`/`demo-data`/`schema`/`validate`/`dashboard` never import
+scikit-learn. `detect` only imports it indirectly, via `registry.load_model`
+deserializing (via `skops.io`) an existing model -- if none exists yet,
+`detect` runs baseline-only and never touches scikit-learn either. `train`
+imports `anomaly.train` (which imports
 scikit-learn at module level) lazily, inside a try/except, so the
 zero-dependency core guarantee holds for every other command even when
 scikit-learn is not installed.
@@ -27,8 +28,10 @@ integration surface llmledger offers; it never sends notifications itself):
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Iterator
@@ -66,6 +69,23 @@ def _print_header(pricing: dict) -> None:
 def _load_pricing_file(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _print_report_csv(result: dict) -> None:
+    """Print `result` as a normalized 3-column CSV: one `total` row (empty
+    key), then one row per label, then one row per model, each carrying its
+    own cost in USD. Deliberately ignores `--rub-rate` (documented limitation,
+    not a bug) and skips the human-readable disclaimer/pricing-date header --
+    this output is meant to be piped into a spreadsheet or another program,
+    not read directly, so it stays exactly three columns with no preamble.
+    """
+    writer = csv.writer(sys.stdout, lineterminator="\n")
+    writer.writerow(["dimension", "key", "cost_usd"])
+    writer.writerow(["total", "", f"{result['total_cost_usd']:.6f}"])
+    for label, micros in sorted(result["by_label_micros"].items()):
+        writer.writerow(["label", label, f"{micros / 1_000_000:.6f}"])
+    for model, micros in sorted(result["by_model_micros"].items()):
+        writer.writerow(["model", model, f"{micros / 1_000_000:.6f}"])
 
 
 def _positive_float(value: str) -> float:
@@ -110,6 +130,10 @@ def _filter_report_records(records, args, counts: dict) -> Iterator[dict]:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    if args.json and args.format == "csv":
+        error("--json and --format csv are mutually exclusive")
+        return 2
+
     try:
         raw_records = iter_log_records(args.log_file)
     except FileNotFoundError as exc:
@@ -128,6 +152,10 @@ def cmd_report(args: argparse.Namespace) -> int:
             f"{counts['dropped_period']} record(s) fell outside --since/--until or lacked a "
             "usable timestamp and were excluded from this period"
         )
+
+    if args.format == "csv":
+        _print_report_csv(result)
+        return 0
 
     if result["call_count"] == 0:
         if args.json:
@@ -438,6 +466,46 @@ def cmd_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    from importlib import resources
+
+    from .validation import validate_record
+
+    try:
+        records = list(iter_log_records(args.log_file))
+    except FileNotFoundError as exc:
+        error(str(exc))
+        return 2
+
+    schema_text = resources.files("llmledger").joinpath("schema.json").read_text(encoding="utf-8")
+    schema = json.loads(schema_text)
+
+    invalid = []
+    for i, record in enumerate(records):
+        errors = validate_record(record, schema)
+        if errors:
+            invalid.append((i, errors))
+
+    if args.json:
+        payload = {
+            "record_count": len(records),
+            "invalid_count": len(invalid),
+            "invalid": [{"index": i, "errors": errs} for i, errs in invalid],
+        }
+        print(json.dumps(payload, indent=2))
+        return 1 if invalid else 0
+
+    print(f"validated {len(records)} record(s) against schema.json")
+    if not invalid:
+        print("all records valid")
+    for i, errs in invalid:
+        print(f"- [{i}]")
+        for e in errs:
+            print(f"    {e}")
+
+    return 1 if invalid else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="llmledger", description=__doc__)
     parser.add_argument("--version", action="version", version=f"llmledger {__version__}")
@@ -475,6 +543,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--json", action="store_true", help="Print a machine-readable JSON summary"
+    )
+    report_p.add_argument(
+        "--format",
+        choices=["text", "csv"],
+        default="text",
+        help="Output format. 'csv' prints a normalized dimension,key,cost_usd table "
+        "(total/label/model rows) instead of the human-readable summary; ignores "
+        "--rub-rate and cannot be combined with --json.",
     )
     report_p.set_defaults(handler=cmd_report)
 
@@ -534,6 +610,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     schema_p = subparsers.add_parser("schema", help="Print the JSONL log schema")
     schema_p.set_defaults(handler=cmd_schema)
+
+    validate_p = subparsers.add_parser(
+        "validate", help="Check a log's records against the packaged JSON schema"
+    )
+    validate_p.add_argument("--log-file", required=True)
+    validate_p.add_argument(
+        "--json", action="store_true", help="Print a machine-readable JSON summary"
+    )
+    validate_p.set_defaults(handler=cmd_validate)
 
     return parser
 

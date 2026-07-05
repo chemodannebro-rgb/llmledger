@@ -28,6 +28,65 @@ def test_schema_command_prints_valid_json_matching_packaged_schema(capsys):
     assert schema["title"] == "llmledger JSONL log record"
 
 
+def test_validate_command_on_valid_demo_log_reports_all_valid(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["validate", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "validated 5 record(s)" in captured.out
+    assert "all records valid" in captured.out
+
+
+def test_validate_command_reports_invalid_records_and_exits_1(tmp_path, capsys):
+    log_path = tmp_path / "bad.jsonl"
+    with log_path.open("w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "label": "",
+                    "model": "gpt-4o",
+                    "input_tokens": -5,
+                    "output_tokens": 10,
+                    "cost_micros": 100,
+                }
+            )
+            + "\n"
+        )
+
+    exit_code = main(["validate", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "below minLength" in captured.out
+    assert "below minimum" in captured.out
+
+
+def test_validate_command_json_flag_prints_machine_readable_summary(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=3, n_anomalies=0)
+
+    exit_code = main(["validate", "--log-file", str(log_path), "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["record_count"] == 3
+    assert payload["invalid_count"] == 0
+    assert payload["invalid"] == []
+
+
+def test_validate_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
+    missing = tmp_path / "does-not-exist.jsonl"
+    exit_code = main(["validate", "--log-file", str(missing)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "[llmledger] error:" in captured.err
+
+
 def test_demo_data_command_writes_log_and_reports_count(tmp_path, capsys):
     out_path = tmp_path / "out.jsonl"
     exit_code = main(["demo-data", "--out", str(out_path), "--n-normal", "5", "--n-anomalies", "1"])
@@ -197,6 +256,45 @@ def test_report_json_flag_includes_rub_conversion_when_rate_given(tmp_path, caps
     assert exit_code == 0
     assert payload["rub_rate"] == 90
     assert payload["total_cost_rub"] == pytest.approx(payload["total_cost_usd"] * 90)
+
+
+def test_report_csv_format_prints_total_label_model_rows(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["report", "--log-file", str(log_path), "--format", "csv"])
+    captured = capsys.readouterr()
+    lines = captured.out.strip().splitlines()
+
+    assert exit_code == 0
+    assert lines[0] == "dimension,key,cost_usd"
+    assert lines[1].startswith("total,,")
+    assert any(line.startswith("label,") for line in lines[1:])
+    assert any(line.startswith("model,") for line in lines[1:])
+    assert DISCLAIMER not in captured.out
+
+
+def test_report_csv_format_on_empty_log_prints_zero_total_only(tmp_path, capsys):
+    log_path = tmp_path / "empty.jsonl"
+    log_path.write_text("")
+
+    exit_code = main(["report", "--log-file", str(log_path), "--format", "csv"])
+    captured = capsys.readouterr()
+    lines = captured.out.strip().splitlines()
+
+    assert exit_code == 0
+    assert lines == ["dimension,key,cost_usd", "total,,0.000000"]
+
+
+def test_report_csv_format_rejects_json_flag_combo(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(
+        ["report", "--log-file", str(log_path), "--format", "csv", "--json"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "mutually exclusive" in captured.err
 
 
 def test_report_trace_id_filters_to_matching_records(tmp_path, capsys):
@@ -600,4 +698,9 @@ def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):
     detect_exit = main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
     captured = capsys.readouterr()
     assert detect_exit == 1
+    assert "unexpected error" not in captured.err
+
+    validate_exit = main(["validate", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+    assert validate_exit == 0
     assert "unexpected error" not in captured.err

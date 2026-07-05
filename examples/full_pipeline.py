@@ -1,7 +1,7 @@
 """End-to-end walkthrough: CostTracker -> demo data -> baseline detection ->
-ML training -> ML-assisted detection.
+dashboard -> ML training -> ML-assisted detection.
 
-Everything through step 3 (baseline detection) works with only the core
+Everything through step 3 (writing the dashboard) works with only the core
 package installed. Steps 4-5 require the optional ML extra:
 
     pip install "llmledger[anomaly]"
@@ -19,8 +19,10 @@ import tempfile
 from pathlib import Path
 
 from llmledger.anomaly.baseline import analyze, format_score
+from llmledger.dashboard import render_dashboard
 from llmledger.demo_data import write_demo_log
-from llmledger.logreader import iter_log_records
+from llmledger.logreader import filter_by_period, iter_log_records, parse_date
+from llmledger.tracker import load_default_pricing
 
 
 def main() -> None:
@@ -46,7 +48,21 @@ def main() -> None:
             if score.is_anomalous:
                 print(f"      {format_score(score)}")
 
-    # 3. Train an IsolationForest as a second, ML-based opinion. This is the
+    # 3. Write a static HTML dashboard, the same output `llmledger dashboard`
+    #    produces. All the demo calls were logged just now, so they share one
+    #    UTC calendar date -- `--since`/`--until` (here via
+    #    `filter_by_period`/`parse_date` directly, the same helpers the CLI
+    #    uses) narrows the dashboard to that one date. On a real log spanning
+    #    many days this is how you'd scope a report to a billing period, an
+    #    incident window, etc.
+    today = parse_date(records[0]["timestamp"])
+    scoped_records = filter_by_period(records, since=today, until=today)
+    dashboard_path = work_dir / "dashboard.html"
+    html = render_dashboard(scoped_records, load_default_pricing(), since=today, until=today)
+    dashboard_path.write_text(html, encoding="utf-8")
+    print(f"\nwrote dashboard for {today} ({len(scoped_records)} call(s)) to {dashboard_path}")
+
+    # 4. Train an IsolationForest as a second, ML-based opinion. This is the
     #    one part of llmledger that needs scikit-learn, so the import is
     #    deliberately deferred to here and guarded -- the rest of this
     #    script (and the rest of the package) never imports it at module
@@ -60,10 +76,17 @@ def main() -> None:
         )
         return
 
-    version_dir = train(records, model_dir=model_dir)
+    version_dir, eval_metrics = train(records, model_dir=model_dir)
     print(f"\ntrained model saved to {version_dir}")
+    if eval_metrics["holdout_used"]:
+        print(
+            f"held-out eval: {eval_metrics['flagged_count']}/{eval_metrics['n_holdout_examples']} "
+            f"({eval_metrics['flagged_fraction']:.1%}) held-out example(s) flagged anomalous"
+        )
+    else:
+        print(f"held-out eval skipped: {eval_metrics['reason']}")
 
-    # 4. Load the trained model back and cross-check the same log with it.
+    # 5. Load the trained model back and cross-check the same log with it.
     from llmledger.anomaly.features import extract_features
     from llmledger.anomaly.registry import load_model
 
