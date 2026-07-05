@@ -1,302 +1,316 @@
-# Backlog team review — round 4
+# Командное ревью бэклога — раунд 4
 
-`BACKLOG.md` (items 1-30) was built over three rounds by pulling one or two
-people in at a time (an audit pass, then two brainstorm passes). This
-document is the first pass where **every role on the team reviews the whole
-backlog at once**, on the record, and each contributes at least one item
-nobody has named yet. CTO and Product Director close it out by reconciling
-all of it into one final table, ordered strictly by priority.
+`BACKLOG.md` (пункты 1-30) строился в три раунда, подключая по одному-два
+человека за раз (аудит, затем два раунда брейншторма). Этот документ —
+первый проход, где **каждая роль в команде ревьюит весь бэклог разом**,
+явно, и каждый добавляет как минимум один пункт, которого раньше никто не
+называл. CTO и Директор по продукту закрывают процесс, сводя всё это в
+одну итоговую таблицу, строго упорядоченную по приоритету.
 
-Nothing below duplicates a Round 1-3 item under a new number — every new
-item (31-38) was checked against actual source before being added, same bar
-as Round 2/3.
+Ничто ниже не дублирует пункт из раундов 1-3 под новым номером — каждый
+новый пункт (31-38) был сверен с реальным исходным кодом перед добавлением,
+по той же планке, что и раунды 2/3.
 
 ---
 
-## Product Director
+## Директор по продукту
 
-**Review of 1-30:** the backlog has grown to 30 items across three
-uncoordinated rounds with no defined cadence for re-prioritizing it —
-nothing says *when* "Needs decision" items (1, 9, 10, 29) actually get
-revisited, so they risk sitting forever. That's a process gap in how this
-document itself is run, not a code gap.
+**Ревью пунктов 1-30:** бэклог вырос до 30 пунктов за три несогласованных
+раунда без определённого ритма пересмотра приоритетов — нигде не сказано,
+*когда* пункты «Требует решения» (1, 9, 10, 29) на самом деле должны быть
+пересмотрены, так что есть риск, что они зависнут навсегда. Это пробел в
+процессе ведения самого документа, а не пробел в коде.
 
-**New item (31 in the earlier draft numbering, folded in below as #38):**
-there is no stated success metric for this portfolio project (stars? a
-specific number of "used this to debug a real incident" reports? just "I
-personally use it"?). Without one, prioritizing marketing items (19, 20,
-35) against engineering items (21, 22) is a matter of taste, not evidence —
-every round so far has ordered them by gut feel.
+**Новый пункт (в черновике — #31, ниже включён под номером #38):**
+для этого портфолио-проекта не определена метрика успеха (звёзды на
+GitHub? конкретное число отчётов «использовал это, чтобы отладить реальный
+инцидент»? просто «я лично этим пользуюсь»?). Без неё приоритизация
+маркетинговых пунктов (19, 20, 35) относительно инженерных (21, 22) — дело
+вкуса, а не свидетельств: каждый предыдущий раунд упорядочивал их на глаз.
 
-**Sign-off:** endorses CTO's promotion of #21 to the top of the list. Will
-own adding a recurring "revisit Needs-decision items" checkpoint once
-CONTRIBUTING.md (#6) exists.
+**Заключение:** поддерживает решение CTO поднять #21 в начало списка.
+Возьмёт на себя добавление регулярной контрольной точки «пересмотреть
+пункты со статусом «Требует решения»», как только появится CONTRIBUTING.md
+(#6).
 
 ---
 
 ## CTO / Tech Lead
 
-**Review of 1-30:** confirms #21 (registry race condition) is the correct
-top item — it's the only one in the whole backlog that's an active
-correctness bug rather than a missing feature, and it's cheap to fix (pin
-the resolved version number before `detect` loads it, don't re-resolve
-"latest" mid-operation). Also confirms #17 (property-based tests) is worth
-approving as a dev-only `hypothesis` dependency — see #32 below, which is
-exactly the kind of edge case a fuzzer would have surfaced before a human
-had to go read `analyze()` line by line to find it.
+**Ревью пунктов 1-30:** подтверждает, что #21 (гонка в реестре моделей) —
+верный пункт номер один: это единственный пункт во всём бэклоге, который
+является активным багом корректности, а не недостающей фичей, и его
+дёшево починить (закрепить резолвленный номер версии до того, как
+`detect` его загрузит, не резолвить «latest» повторно посреди операции).
+Также подтверждает, что #17 (property-based тесты) стоит одобрить как
+dev-only зависимость `hypothesis` — см. #32 ниже, это именно тот тип
+граничного случая, который фаззер бы вскрыл раньше, чем человеку пришлось
+читать `analyze()` построчно, чтобы его найти.
 
-**New item — no `ARCHITECTURE.md` stating the "core stays zero-dependency,
-only extras add dependencies" rule as an explicit, standalone policy.**
-Verified: this rule is currently enforced by one test
-(`test_core_commands_make_no_network_attempts`) and stated in README prose
-in two different sections ("Installation", "System boundaries"), but there
-is no single doc a contributor can point to when a PR proposes a new
-dependency. Items 7, 9, 10, and 17 in this backlog all independently
-re-derive this same constraint from scratch in their own notes — that's a
-sign the rule should be written down once, not re-argued per item.
+**Новый пункт — нет `ARCHITECTURE.md`, фиксирующего правило «ядро
+остаётся zero-dependency, только extras добавляют зависимости» как явную,
+отдельную политику.** Подтверждено: сейчас это правило закреплено одним
+тестом (`test_core_commands_make_no_network_attempts`) и сформулировано в
+прозе README в двух разных разделах («Installation», «System
+boundaries»), но нет ни одного документа, на который контрибьютор мог бы
+сослаться, когда PR предлагает новую зависимость. Пункты 7, 9, 10 и 17 в
+этом бэклоге все независимо друг от друга заново выводят это же
+ограничение с нуля в своих собственных заметках — это признак того, что
+правило нужно записать один раз, а не переспорить заново на каждом
+пункте.
 
-**Sign-off:** approves scheduling #21 immediately; groups #22 and the new
-#32 together as one "scale correctness" pass since they compound on the
-same large-log scenario.
+**Заключение:** одобряет немедленное планирование #21; группирует #22 и
+новый #32 вместе как один проход «корректность масштаба», поскольку они
+складываются на одном и том же сценарии большого лога.
 
 ---
 
 ## Backend/Core Engineer
 
-**Review of 1-30:** agrees #13 (`trace_id` dead weight), #15 (no
-`pricing.json` history), #26 (`report` missing `--json`) are all small,
-additive, and ready to schedule as-is.
+**Ревью пунктов 1-30:** согласен, что #13 (мёртвый груз `trace_id`), #15
+(нет истории `pricing.json`) и #26 (у `report` нет `--json`) — все
+маленькие, аддитивные и готовы к планированию как есть.
 
-**New item — no `llmledger validate` command.** Verified: `cli.py` only
-exposes `report`, `dashboard`, `demo-data`, `detect`, `train`, `schema` —
-there is no subcommand that runs a log file through the JSON-schema checks
-`llmledger` already performs internally on its own writes, so a non-Python
-client (Node.js, Go, ...) implementing the schema by hand (which the README
-explicitly invites in the "Log format" section) has no way to check their
-output against `schema.json` except by installing `llmledger` and reading
-Python internals. A thin `llmledger validate --log-file <path>` that
-reports the first N schema violations would close that gap directly for
-the exact audience the README's own wording is aimed at.
+**Новый пункт — нет команды `llmledger validate`.** Подтверждено: `cli.py`
+предоставляет только `report`, `dashboard`, `demo-data`, `detect`,
+`train`, `schema` — нет подкоманды, которая прогоняла бы лог-файл через
+JSON-schema-проверки, которые `llmledger` уже выполняет внутри себя при
+собственной записи, поэтому у не-Python клиента (Node.js, Go, ...),
+реализующего схему вручную (что README прямо предлагает в разделе «Log
+format»), нет способа сверить свой вывод со `schema.json`, кроме как
+установить `llmledger` и читать внутренности на Python. Тонкая
+`llmledger validate --log-file <path>`, сообщающая о первых N нарушениях
+схемы, закрыла бы этот пробел напрямую для той же аудитории, на которую
+нацелена формулировка README.
 
-**Sign-off:** flags #7 (LangChain/CrewAI/AutoGen) as the biggest single
-item on the list — should not start before #37 (ARCHITECTURE.md) exists,
-so the "own extra, no core dependency" boundary is written down first
-rather than negotiated ad hoc mid-PR.
+**Заключение:** отмечает #7 (LangChain/CrewAI/AutoGen) как самый крупный
+единичный пункт в списке — не должен стартовать раньше #37
+(ARCHITECTURE.md), чтобы граница «собственный extra, без зависимости в
+ядре» была записана заранее, а не согласовывалась на ходу посреди PR.
 
 ---
 
 ## ML Engineer
 
-**Review of 1-30:** endorses #23 (`cached_input_tokens` not scored) and
-#24 (`train` prints no metrics) as the two most concrete ML gaps. Notes
-#14 (time-of-day/day-of-week conditioning) should stay P2/parked — it's a
-real statistics change, not a config flag, and conflicts with the project's
-stated preference for simple, explainable stats over a fancier model.
+**Ревью пунктов 1-30:** поддерживает #23 (`cached_input_tokens` не
+оценивается) и #24 (`train` не печатает метрик) как два самых конкретных
+ML-пробела. Отмечает, что #14 (учёт времени суток/дня недели) должен
+оставаться P2/отложенным — это реальное изменение статистики, а не флаг
+конфигурации, и оно конфликтует с заявленным предпочтением проекта
+простой, объяснимой статистики вместо навороченной модели.
 
-**New item — `analyze()` recomputes median/MAD from scratch for every
-single record in a group, instead of once per group.** Verified in
-`anomaly/baseline.py`: the outer loop (`for r in records`) calls
-`_score_feature(...)` → `_median_mad(history)` again for every record `r`,
-even though `history` (the group's full value list for that feature) is
-identical for every record in the same group. For a group of size G this
-recomputes the same median/MAD G times instead of once, making `analyze()`
-effectively O(G² · len(FEATURES)) instead of O(G log G · len(FEATURES)) per
-group. Harmless on the demo log's small groups; on a real high-volume
-`(label, model)` pair with thousands of calls, this is the actual
-bottleneck long before the "~200k records" whole-log warning
-(`check_scale()`) would even trigger.
+**Новый пункт — `analyze()` пересчитывает медиану/MAD с нуля для каждой
+отдельной записи в группе, вместо одного раза на группу.** Подтверждено в
+`anomaly/baseline.py`: внешний цикл (`for r in records`) вызывает
+`_score_feature(...)` → `_median_mad(history)` заново для каждой записи
+`r`, хотя `history` (полный список значений группы по этой фиче)
+одинаков для каждой записи в одной группе. Для группы размером G это
+пересчитывает одну и ту же медиану/MAD G раз вместо одного, делая
+`analyze()` фактически O(G² · len(FEATURES)) вместо
+O(G log G · len(FEATURES)) на группу. Безобидно на маленьких группах
+демо-лога; на реальной высокообъёмной паре `(label, model)` с тысячами
+вызовов это станет настоящим узким местом задолго до того, как вообще
+сработает предупреждение о «~200k записей» по всему логу
+(`check_scale()`).
 
-**Sign-off:** this is a pure refactor (hoist `_median_mad` out of the
-per-record loop, keyed by group), no behavior/output change, no new
-dependency — safe to schedule ahead of #14.
+**Заключение:** это чистый рефакторинг (вынести `_median_mad` из цикла по
+записям, ключом по группе), без изменения поведения/вывода, без новых
+зависимостей — безопасно запланировать раньше #14.
 
 ---
 
 ## Security Engineer
 
-**Review of 1-30:** endorses #21's severity assessment — a race condition
-that can point `detect` at a pruned model directory is also a security-
-relevant integrity issue (silent fallback/crash on load), not purely a
-concurrency nuisance. Continues to treat #10 (encryption) and #9 (alerting)
-as "Needs decision," not gaps, consistent with prior rounds.
+**Ревью пунктов 1-30:** поддерживает оценку серьёзности #21 — гонка,
+способная направить `detect` на обрезанную директорию модели, это ещё и
+security-релевантная проблема целостности (тихий fallback/крах при
+загрузке), а не просто неудобство конкурентности. По-прежнему считает
+#10 (шифрование) и #9 (алертинг) пунктами «Требует решения», а не
+пробелами, согласно предыдущим раундам.
 
-**New item — no provenance/tampering check on training data itself.**
-Verified: `anomaly/train.py`'s `train()` reads whichever log file/records
-it's given and calls `model.fit(X)` directly — there is no hash or
-checksum of the training input recorded anywhere in the resulting
-`model.skops` bundle's metadata (only the model's own SHA256 exists, per
-`SECURITY.md`, which protects the *output* artifact, not the *input*). If
-someone with write access to a shared log file/directory quietly inserted
-records shaped to normalize what would otherwise be flagged as anomalous
-(a "poison the baseline" attack), nothing would currently catch it. Lower
-severity than #21 — it requires an attacker who already has log write
-access, which is a narrower threat model than most items here — but worth
-recording since `SECURITY.md` doesn't currently mention this trust
-boundary at all.
+**Новый пункт — нет проверки происхождения/подделки обучающих данных.**
+Подтверждено: `train()` в `anomaly/train.py` читает любой переданный
+лог-файл/записи и напрямую вызывает `model.fit(X)` — нигде в метаданных
+результирующего пакета `model.skops` не фиксируется хеш или чек-сумма
+входных обучающих данных (существует только собственный SHA256 модели,
+согласно `SECURITY.md`, который защищает *выходной* артефакт, а не
+*входной*). Если кто-то с правом записи в общий лог-файл/директорию тихо
+вставит записи, специально подобранные, чтобы нормализовать то, что
+иначе было бы помечено как аномалия («отравление» baseline), сейчас это
+никто не поймает. Ниже по серьёзности, чем #21 — требует злоумышленника,
+у которого уже есть доступ на запись в лог, что более узкая модель угроз,
+чем у большинства пунктов здесь — но стоит зафиксировать, поскольку
+`SECURITY.md` сейчас вообще не упоминает эту границу доверия.
 
-**Sign-off:** recommends this stay P2 unless a real multi-writer/shared-
-log deployment (see README's "directory mode for multiple processes")
-becomes a stated use case, at which point it should be revisited as a
-"Needs decision" instead.
+**Заключение:** рекомендует оставить это P2, пока реальный сценарий
+общего лога с несколькими писателями (см. «directory mode для нескольких
+процессов» в README) не станет заявленным use case, после чего стоит
+пересмотреть как «Требует решения».
 
 ---
 
 ## Frontend/UX Engineer
 
-**Review of 1-30:** endorses #16 (`@media print`) and #11 (period-cost
-sparkline, so long as it stays fixed-width — same constraint that fixed
-the v0.4.0 bug). No objection to #20 (GitHub Pages demo) going ahead
-independently of any dashboard code change.
+**Ревью пунктов 1-30:** поддерживает #16 (`@media print`) и #11
+(спарклайн стоимости за период, при условии сохранения фиксированной
+ширины — то же ограничение, что исправило баг v0.4.0). Нет возражений
+против #20 (демо на GitHub Pages), которое может двигаться независимо от
+любых изменений кода дашборда.
 
-**New item — no per-day anchor/deep-link in the daily journal.**
-Verified: `dashboard.py`'s `_render_journal()` emits `<details
-class="day">` with no `id` attribute on any entry. With 60+ collapsed days
-in a long-period dashboard, there's no way to link directly to, or
-bookmark, one specific day (e.g. to send a teammate "look at July 3") —
-every visit starts fully collapsed and requires manually finding and
-opening the right row. Adding `id="day-{date}"` costs nothing (no JS, no
-new dependency) and is purely additive to the existing static HTML.
+**Новый пункт — нет пер-дневного якоря/deep-link в дневном журнале.**
+Подтверждено: `_render_journal()` в `dashboard.py` выводит `<details
+class="day">` без атрибута `id` у какой-либо записи. При 60+ свёрнутых
+днях в дашборде за длинный период нет способа сослаться напрямую или
+добавить в закладки конкретный день (например, отправить коллеге «глянь
+на 3 июля») — каждый визит начинается полностью свёрнутым и требует
+вручную найти и открыть нужную строку. Добавление `id="day-{date}"`
+ничего не стоит (без JS, без новых зависимостей) и чисто аддитивно к
+существующему статическому HTML.
 
-**Sign-off:** this is the cheapest UX fix on the list — smaller than #16
-or #11, should slot in alongside whichever of those ships first.
+**Заключение:** это самое дешёвое UX-исправление в списке — меньше, чем
+#16 или #11, должно встать рядом с тем, что из них выйдет первым.
 
 ---
 
 ## QA/Test Engineer
 
-**Review of 1-30:** endorses #17 (property-based tests) and #30 (thin
-`logreader.py`/`_messages.py` coverage) as the two highest-value testing
-gaps, and #18 (coverage measurement in CI) as the cheapest way to make
-gaps like these visible automatically instead of by manual code reading
-(as this whole review round had to do).
+**Ревью пунктов 1-30:** поддерживает #17 (property-based тесты) и #30
+(слабое покрытие `logreader.py`/`_messages.py`) как два самых ценных
+пробела в тестировании, и #18 (измерение покрытия в CI) как самый
+дешёвый способ сделать подобные пробелы видимыми автоматически, вместо
+ручного чтения кода (именно так пришлось делать в этом раунде ревью).
 
-**No new numbered item** — instead, a reinforcing note on existing #8
-(the "visual check required" process rule): the mobile CSS overlap bug
-from v0.4.0 is proof that *structural* tests (grep-for-a-CSS-rule) and
-*visual* checks catch genuinely different bug classes, and #8 already
-captures the right process fix. Considered proposing an automated visual-
-regression tool here, but that would mean a new dependency (Playwright or
-similar) — explicitly out of scope until CTO/Product Director decide the
-project wants one, so this is deliberately left as reinforcement of #8
-rather than a new item.
+**Нового пункта с номером нет** — вместо этого заметка, усиливающая
+существующий #8 (правило процесса «нужна визуальная проверка»): мобильный
+CSS-баг наложения из v0.4.0 — доказательство того, что *структурные*
+тесты (grep конкретного CSS-правила) и *визуальные* проверки ловят
+действительно разные классы багов, и #8 уже фиксирует правильное
+исправление процесса. Рассматривался вариант предложить здесь
+автоматизированный инструмент визуальной регрессии, но это означало бы
+новую зависимость (Playwright или аналог) — явно вне скоупа, пока CTO/
+Директор по продукту не решат, что проекту это нужно, поэтому это
+намеренно оставлено как усиление #8, а не новый пункт.
 
-**Sign-off:** would like #18 (coverage in CI) sequenced early precisely
-because it would have made gaps like ML Engineer's new #32 or ##23/24
-visible as "untested branch" automatically, rather than requiring a full
-manual line-by-line read of `baseline.py`/`train.py` to find them.
+**Заключение:** хотел бы, чтобы #18 (покрытие в CI) был запланирован
+рано именно потому, что он бы сделал видимыми такие пробелы, как новый
+#32 у ML Engineer или #23/24, автоматически, а не через полное ручное
+построчное чтение `baseline.py`/`train.py` для их поиска.
 
 ---
 
 ## Technical Writer/Docs
 
-**Review of 1-30:** endorses #6 (CONTRIBUTING.md), #15 (pricing changelog),
-#19 (ICP line).
+**Ревью пунктов 1-30:** поддерживает #6 (CONTRIBUTING.md), #15 (история
+изменений прайсинга), #19 (строка ICP).
 
-**New item — `examples/basic_tracking.py` and `examples/full_pipeline.py`
-were never updated for the `dashboard` command or `--since`/`--until`.**
-Verified: `grep -l "dashboard\|since\|until" examples/*.py` returns no
-matches in either file. Both examples predate the v0.3.0/v0.4.0 dashboard
-work entirely — someone reading the examples directory today would not
-know the dashboard command exists at all, despite it being the single most
-visually demo-able feature in the whole project (see #3, #20).
+**Новый пункт — `examples/basic_tracking.py` и `examples/full_pipeline.py`
+никогда не обновлялись под команду `dashboard` или `--since`/`--until`.**
+Подтверждено: `grep -l "dashboard\|since\|until" examples/*.py` не
+возвращает совпадений ни в одном из файлов. Оба примера предшествуют всей
+работе над дашбордом v0.3.0/v0.4.0 — тот, кто сегодня читает директорию
+examples, вообще не узнал бы, что команда dashboard существует, несмотря
+на то что это самая наглядно демонстрируемая фича во всём проекте (см.
+#3, #20).
 
-**Sign-off:** this is a documentation-only fix, ships independently of any
-other item, and directly reinforces the marketing case being made in #3
-and #20 — a reader following the examples should land on the dashboard,
-not miss it entirely.
+**Заключение:** это исправление только документации, выходит независимо
+от любого другого пункта и напрямую усиливает маркетинговый аргумент,
+приводимый в #3 и #20 — читатель, следующий примерам, должен прийти к
+дашборду, а не полностью его пропустить.
 
 ---
 
 ## Marketing/DevRel
 
-**Review of 1-30:** endorses #3 (dashboard screenshot) and #20 (live demo)
-as the two highest-leverage portfolio improvements available, and #19
-(ICP line) as the cheapest positioning fix.
+**Ревью пунктов 1-30:** поддерживает #3 (скриншот дашборда) и #20 (живое
+демо) как два самых высокорычаговых улучшения портфолио, и #19 (строка
+ICP) как самое дешёвое исправление позиционирования.
 
-**New item — README has no badges beyond CI.** Verified: `grep -n
-"badge\|shields.io" README.md` returns only the one existing CI badge
-(line 3). No license badge, no supported-Python-version badge. Cheap,
-static, no network call at page-render time beyond the badge image itself
-(same category as the existing CI badge, not a new precedent) — a fast
-trust signal for a portfolio reviewer scanning the repo for ten seconds.
+**Новый пункт — в README нет бейджей, кроме CI.** Подтверждено: `grep -n
+"badge\|shields.io" README.md` возвращает только один существующий бейдж
+CI (строка 3). Нет бейджа лицензии, нет бейджа поддерживаемых версий
+Python. Дёшево, статично, без сетевого вызова при рендере страницы сверх
+самой картинки бейджа (та же категория, что уже существующий CI-бейдж,
+не новый прецедент) — быстрый сигнал доверия для ревьюера портфолио,
+пробегающего репозиторий за десять секунд.
 
-**Sign-off:** ranks this below #3/#19/#20 — those are actual visual/
-positioning gaps, badges are a smaller polish item.
+**Заключение:** ставит это ниже #3/#19/#20 — те являются настоящими
+визуальными/позиционными пробелами, бейджи — более мелкий пункт полировки.
 
 ---
 
-## CTO + Product Director — final synthesis
+## CTO + Директор по продукту — итоговый синтез
 
-Both reviewed every item above (1-30 plus 31-38) together. Reconciliation
-notes:
+Оба разобрали каждый пункт выше (1-30 плюс 31-38) вместе. Заметки по
+согласованию:
 
-- **#21 stays the single top item.** It is the only correctness bug in the
-  entire backlog; everything else is a missing feature or a documentation
-  gap. Nothing raised in this review changes that.
-- **#22 and the new #32 are sequenced together** as one "scale
-  correctness" pass — both only matter on a large log, both are about the
-  same class of problem (doing more work than necessary as records grow),
-  and #32's fix is trivial enough to ship in the same PR as #22 without
-  meaningfully increasing its scope.
-- **#17 (property-based tests) is approved** as a new dev-only
-  `hypothesis` dependency — CTO's sign-off above, plus the fact that #32
-  is exactly the kind of case a fuzzer would have found mechanically
-  instead of requiring a manual line-by-line read, is enough evidence to
-  approve it now rather than leave it pending.
-- **#37 (ARCHITECTURE.md) is pulled forward ahead of #7** (LangChain/
-  CrewAI/AutoGen adapters) specifically because Backend/Core Engineer
-  flagged that #7 keeps re-deriving the same "own extra, no core
-  dependency" rule that #37 would state once, for good.
-- **New items 31, 33, 34, 35 are folded into the existing P1/P2 bands**
-  at the priority level their proposing role suggested — none of them
-  changed the ranking of any item already in Round 1-3.
-- **Item 38 (no defined success metric) stays a process note, not a
-  scheduled item** — Product Director owns following up on it, not
-  engineering.
-- **"Needs decision" items (1, 9, 10, 29) are unchanged** — reconfirmed
-  as deliberately deferred per the project owner, not reprioritized by
-  this review, and are listed last because no code can be scheduled
-  against them until that explicit decision happens.
+- **#21 остаётся единственным пунктом номер один.** Это единственный баг
+  корректности во всём бэклоге; всё остальное — недостающая фича или
+  пробел в документации. Ничто из поднятого в этом ревью это не меняет.
+- **#22 и новый #32 объединены в последовательность** как один проход
+  «корректность масштаба» — оба важны только на большом логе, оба про
+  один класс проблемы (выполнение большего объёма работы, чем нужно, по
+  мере роста записей), и исправление #32 достаточно тривиально, чтобы
+  выйти в том же PR, что и #22, не увеличивая его скоуп существенно.
+- **#17 (property-based тесты) одобрен** как новая dev-only зависимость
+  `hypothesis` — заключение CTO выше, плюс факт, что #32 — именно тот
+  случай, который фаззер нашёл бы механически вместо ручного построчного
+  чтения, достаточное основание одобрить его сейчас, а не оставлять
+  висеть.
+- **#37 (ARCHITECTURE.md) выдвинут перед #7** (адаптеры LangChain/
+  CrewAI/AutoGen) именно потому, что Backend/Core Engineer отметил: #7
+  всё время заново выводит то же правило «свой extra, без зависимости в
+  ядре», которое #37 сформулировал бы один раз, окончательно.
+- **Новые пункты 31, 33, 34, 35 включены в существующие полосы P1/P2**
+  на том уровне приоритета, который предложила предлагающая роль — ни
+  один из них не изменил ранжирование какого-либо пункта из раундов 1-3.
+- **Пункт 38 (нет определённой метрики успеха) остаётся заметкой
+  процесса, а не запланированным пунктом** — им владеет Директор по
+  продукту, а не инженерия.
+- **Пункты «Требует решения» (1, 9, 10, 29) не изменены** —
+  переподтверждены как сознательно отложенные по решению владельца
+  проекта, не пересмотрены этим ревью, и стоят последними, поскольку
+  никакой код не может быть запланирован против них, пока это явное
+  решение не принято.
 
-### Final backlog — single table, ordered by priority
+### Итоговый бэклог — единая таблица, упорядоченная по приоритету
 
-| Priority | # | Item | Owner(s) |
+| Приоритет | # | Пункт | Владелец(ы) |
 |---|---|---|---|
-| **P0** | 21 | Race condition between concurrent `train`/`detect` on the same `model_dir` | Backend/Core Engineer, Security Engineer |
-| **P0** | 2 | Structured explainability (`reasons` field) in `detect --json` | ML Engineer |
-| **P0** | 3 | README dashboard screenshot/GIF | Marketing/DevRel, Frontend/UX Engineer |
-| **P1** | 22 | `report`/`detect` materialize the entire log before processing | Backend/Core Engineer, CTO |
-| **P1** | 32 | `analyze()` recomputes median/MAD per-record instead of once per group | ML Engineer |
-| **P1** | 26 | `report` has no `--json` flag | Backend/Core Engineer |
-| **P1** | 13 | `trace_id` captured but never read back | Backend/Core Engineer, Product Director |
-| **P1** | 23 | `cached_input_tokens` not scored by either detector | ML Engineer |
-| **P1** | 24 | `train` prints no evaluation metrics, no held-out split | ML Engineer |
-| **P1** | 17 | No property-based/fuzz tests for anomaly math (approved: new dev-only `hypothesis` dep) | QA/Test Engineer, CTO |
-| **P1** | 15 | No change history for `pricing.json` itself | Backend/Core Engineer, Technical Writer/Docs |
-| **P1** | 36 | `examples/*.py` never updated for `dashboard`/`--since`/`--until` | Technical Writer/Docs |
-| **P1** | 37 | No `ARCHITECTURE.md` stating the zero-dependency-core/extras-only rule | CTO |
-| **P1** | 19 | Explicit ICP line in README | Product Director, Marketing/DevRel |
-| **P1** | 4 | `--pricing-file` point overrides | Backend/Core Engineer |
-| **P1** | 5 | CSV/tabular export (`report --format csv`) | Backend/Core Engineer |
-| **P1** | 6 | CONTRIBUTING.md | Technical Writer/Docs, Product Director |
-| **P1** | 31 | `llmledger validate` command | Backend/Core Engineer |
-| **P1** | 7 | LangChain/CrewAI/AutoGen adapters (blocked on #37 landing first) | ML Engineer, CTO |
-| **P1** | 8 | Process rule: visual check required for dashboard CSS/HTML changes | QA/Test Engineer, Product Director |
-| **P2** | 34 | Per-day anchor/deep-link (`id="day-..."`) in the dashboard journal | Frontend/UX Engineer |
-| **P2** | 11 | Inline period-cost sparkline in dashboard header (fixed-width) | Frontend/UX Engineer |
-| **P2** | 16 | `@media print` stylesheet for the dashboard | Frontend/UX Engineer |
-| **P2** | 18 | Test-coverage measurement in CI (`pytest-cov`, visibility only) | QA/Test Engineer |
-| **P2** | 30 | Thin test coverage: `logreader.py` corruption edges, `_messages.py` | QA/Test Engineer |
-| **P2** | 20 | Live-hosted demo dashboard (GitHub Pages) | Marketing/DevRel, Frontend/UX Engineer |
-| **P2** | 35 | README badges beyond CI (license, Python versions) | Marketing/DevRel |
-| **P2** | 14 | Baseline detector: no time-of-day/day-of-week conditioning | ML Engineer, CTO |
-| **P2** | 25 | `demo_data.py` injects only one anomaly shape | ML Engineer, QA/Test Engineer |
-| **P2** | 27 | No rollback/promote command for the model registry | Backend/Core Engineer |
-| **P2** | 28 | `pricing.json` flat per-model, no tiers/provider disambiguation | Backend/Core Engineer, Product Director |
-| **P2** | 33 | No provenance/tampering check on training data | Security Engineer |
-| **P2** | 12 | Async logging mode for `CostTracker` | Backend/Core Engineer |
-| **P2** | 38 | No defined success metric for the portfolio project (process, not code) | Product Director |
-| **Needs decision** | 1 | PyPI publication | CTO, Marketing/DevRel, Product Director |
-| **Needs decision** | 9 | Budget alerts / notification integration | CTO, Security Engineer, Product Director |
-| **Needs decision** | 10 | Log-file-at-rest encryption | Security Engineer, CTO, Product Director |
-| **Needs decision** | 29 | No idempotency/dedup safeguard against double-logging | Backend/Core Engineer, CTO |
+| **P0** | 21 | Гонка между конкурентными `train`/`detect` на одном `model_dir` | Backend/Core Engineer, Security Engineer |
+| **P0** | 2 | Структурированная объяснимость (поле `reasons`) в `detect --json` | ML Engineer |
+| **P0** | 3 | Скриншот/GIF дашборда в README | Marketing/DevRel, Frontend/UX Engineer |
+| **P1** | 22 | `report`/`detect` материализуют весь лог перед обработкой | Backend/Core Engineer, CTO |
+| **P1** | 32 | `analyze()` пересчитывает медиану/MAD на запись вместо одного раза на группу | ML Engineer |
+| **P1** | 26 | У `report` нет флага `--json` | Backend/Core Engineer |
+| **P1** | 13 | `trace_id` фиксируется, но никогда не читается обратно | Backend/Core Engineer, Директор по продукту |
+| **P1** | 23 | `cached_input_tokens` не оценивается ни одним из детекторов | ML Engineer |
+| **P1** | 24 | `train` не печатает метрик оценки, нет отложенной выборки | ML Engineer |
+| **P1** | 17 | Нет property-based/фаззинг-тестов для статистики аномалий (одобрено: новая dev-only зависимость `hypothesis`) | QA/Test Engineer, CTO |
+| **P1** | 15 | Нет истории изменений самого `pricing.json` | Backend/Core Engineer, Technical Writer/Docs |
+| **P1** | 36 | `examples/*.py` никогда не обновлялись под `dashboard`/`--since`/`--until` | Technical Writer/Docs |
+| **P1** | 37 | Нет `ARCHITECTURE.md`, фиксирующего правило zero-dependency-ядра/extras-only | CTO |
+| **P1** | 19 | Явная строка ICP в README | Директор по продукту, Marketing/DevRel |
+| **P1** | 4 | Точечные переопределения `--pricing-file` | Backend/Core Engineer |
+| **P1** | 5 | CSV/табличный экспорт (`report --format csv`) | Backend/Core Engineer |
+| **P1** | 6 | CONTRIBUTING.md | Technical Writer/Docs, Директор по продукту |
+| **P1** | 31 | Команда `llmledger validate` | Backend/Core Engineer |
+| **P1** | 7 | Адаптеры LangChain/CrewAI/AutoGen (заблокировано до выхода #37) | ML Engineer, CTO |
+| **P1** | 8 | Правило процесса: визуальная проверка обязательна при изменениях CSS/HTML дашборда | QA/Test Engineer, Директор по продукту |
+| **P2** | 34 | Пер-дневный якорь/deep-link (`id="day-..."`) в журнале дашборда | Frontend/UX Engineer |
+| **P2** | 11 | Встроенный спарклайн стоимости за период в шапке дашборда (фикс. ширина) | Frontend/UX Engineer |
+| **P2** | 16 | Печатная таблица стилей (`@media print`) для дашборда | Frontend/UX Engineer |
+| **P2** | 18 | Измерение покрытия тестами в CI (`pytest-cov`, только для наглядности) | QA/Test Engineer |
+| **P2** | 30 | Слабое покрытие тестами: граничные случаи `logreader.py`, `_messages.py` | QA/Test Engineer |
+| **P2** | 20 | Живой хостинг демо-дашборда (GitHub Pages) | Marketing/DevRel, Frontend/UX Engineer |
+| **P2** | 35 | Бейджи README сверх CI (лицензия, версии Python) | Marketing/DevRel |
+| **P2** | 14 | В baseline-детекторе нет учёта времени суток/дня недели | ML Engineer, CTO |
+| **P2** | 25 | `demo_data.py` инжектирует только одну форму аномалии | ML Engineer, QA/Test Engineer |
+| **P2** | 27 | Нет команды отката/promote для реестра моделей | Backend/Core Engineer |
+| **P2** | 28 | `pricing.json` плоский на модель, без тарифов/разделения по провайдеру | Backend/Core Engineer, Директор по продукту |
+| **P2** | 33 | Нет проверки происхождения/подделки обучающих данных | Security Engineer |
+| **P2** | 12 | Асинхронный режим логирования для `CostTracker` | Backend/Core Engineer |
+| **P2** | 38 | Не определена метрика успеха портфолио-проекта (процесс, не код) | Директор по продукту |
+| **Требует решения** | 1 | Публикация в PyPI | CTO, Marketing/DevRel, Директор по продукту |
+| **Требует решения** | 9 | Бюджетные алерты / интеграция с уведомлениями | CTO, Security Engineer, Директор по продукту |
+| **Требует решения** | 10 | Шифрование лог-файла at-rest | Security Engineer, CTO, Директор по продукту |
+| **Требует решения** | 29 | Нет защиты от идемпотентности/дедупликации повторного логирования | Backend/Core Engineer, CTO |
