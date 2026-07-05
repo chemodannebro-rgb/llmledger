@@ -54,6 +54,30 @@ coverage with fewer distinct reviewers per change.
 | 11 | **Inline period-cost sparkline in the dashboard header** | Frontend/UX Engineer | P2 | Nice-to-have complement to the per-day mini bars: a single small, fixed-width trend line across the *visible* period at the top of the page. Must stay fixed-width (the whole reason the old whole-log chart was removed in v0.4.0) — same bug class must not come back. |
 | 12 | **Async logging mode for `CostTracker`** | Backend/Core Engineer | P2 | `CostTracker` is fully synchronous today. Only worth doing if a real use case (very high call volume, latency-sensitive caller) shows up — no evidence of that yet, so kept low priority/exploratory rather than scheduled. |
 
+## Round 2 backlog — fresh brainstorm, verified against actual code
+
+Items 1-12 above leaned heavily on the earlier code audit (gaps someone
+had already named: PyPI, alerting, explainability, LangChain, etc.).
+This second pass is the team actually re-reading the source looking for
+things nobody had named yet — each item below was confirmed by reading
+the relevant file before being added, not assumed.
+
+| # | Item | Owner(s) | Priority | Notes |
+|---|---|---|---|---|
+| 13 | **`trace_id` is captured but functionally dead** | Backend/Core Engineer, Product Director | P1 | Verified in `tracker.py`: every adapter accepts and stores `trace_id`, but `build_report`/`dashboard`/`detect` never read it back — there is no way to link a multi-step call (e.g. retrieval + generation in one RAG turn) into a single "cost of this request" number. Only `by_label`/`by_model` aggregation exists today. A `--group-by trace_id` view (or a `report --trace-id <id>` lookup) would make an already-collected field actually useful instead of dead weight. |
+| 14 | **Baseline anomaly detection has no time-of-day/day-of-week conditioning** | ML Engineer, CTO | P2 | Verified in `anomaly/baseline.py`: grouping is purely `(label, model)` history, nothing time-based. A legitimate recurring weekly batch job would get flagged as anomalous every single week forever, since it's scored against all-time history with no seasonal adjustment. Real fix is a genuine statistics change (not just a missing flag), so CTO should weigh it against the project's stated "simple, explainable stats over a fancier model" philosophy before scheduling. |
+| 15 | **No change history for `pricing.json` itself** | Backend/Core Engineer, Technical Writer/Docs | P1 | `pricing.json` only carries a single `last_updated` date with no record of *what* changed since the previous snapshot. For a cost-tracking tool this is a real integrity gap: re-running `report` on the same log after updating `pricing.json` can silently change historical totals with no way to see why. A short `PRICING_CHANGELOG.md` (or a `previous_rate`/`changed` note per model) would close it cheaply. |
+| 16 | **`@media print` stylesheet for the dashboard** | Frontend/UX Engineer | P2 | Not proposed before. The dashboard is a static single HTML file already — a print stylesheet (collapse the `<details>` open, drop hover/dark-mode-only styling) would let someone hand a monthly report to a stakeholder as a clean printed page/PDF, with zero new dependencies and no JS. |
+| 17 | **No property-based/fuzz tests for the anomaly math** | QA/Test Engineer, CTO | P1 | Verified: `tests/` only has example-based cases for `_median_mad`/z-score (specific handcrafted inputs). Edge cases like all-identical values (MAD=0), single-sample groups, negative or extreme `cost_micros` are each tested individually but never fuzzed systematically. Would need `hypothesis` as a new **dev-only** dependency (`[dev]` extra) — doesn't touch the shipped zero-dependency core, but is still a new dependency the CTO should explicitly approve, since the project has so far been deliberately minimal even in its dev tooling. |
+| 18 | **No test-coverage measurement in CI** | QA/Test Engineer | P2 | Nothing tracks how much of the code the 123 passing tests actually exercise (e.g. the dashboard's dark-mode CSS branch, or registry error paths). Adding `pytest-cov` to `[dev]` and reporting a number in CI (no hard gate yet, just visibility) is low-risk and would surface untested branches like item 17 before they cause a real bug — the same class of blind spot that let the mobile CSS overlap bug (v0.4.0) ship past the existing test suite. |
+
+## Round 2 — product-level ideas (not code)
+
+| # | Item | Owner(s) | Priority | Notes |
+|---|---|---|---|---|
+| 19 | **Explicit ICP ("who is this for") line in README** | Product Director, Marketing/DevRel | P1 | Today the README describes *what* it does but not *who* specifically it's for. It quietly serves two different users at once — a solo dev with one JSONL file, and a small team via directory mode/multi-process — without ever saying so. A one-line "built for: a solo builder shipping their own LLM feature who wants cost/anomaly visibility without adopting a full observability platform" would make the positioning land faster for a reviewer skimming the repo. |
+| 20 | **Live-hosted demo dashboard (GitHub Pages), not just a code sample** | Marketing/DevRel, Frontend/UX Engineer | P2 | Right now, seeing the dashboard requires cloning and running `demo-data` + `dashboard` yourself. Since the dashboard is already a single static HTML file with zero JS/network calls, publishing the generated demo output to GitHub Pages costs nothing extra and lets anyone see it live in one click — the single highest-leverage, lowest-effort thing for a portfolio piece whose best artifact is visual. |
+
 ## Already covered by existing tests (checked before adding, not duplicated here)
 
 - End-to-end `dashboard` CLI smoke test (file gets written, correct
