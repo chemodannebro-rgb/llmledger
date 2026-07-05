@@ -15,6 +15,7 @@ would not:
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
@@ -89,6 +90,55 @@ def iter_log_records(path) -> Iterator[dict]:
 
     if corrupt_count:
         warn(f"skipped {corrupt_count} corrupt log line(s) total")
+
+
+def parse_date(timestamp) -> str | None:
+    """Return the UTC calendar date (`YYYY-MM-DD`) for a schema `timestamp`
+    string, or `None` if it's missing/unparseable.
+
+    Normalizes a trailing `Z` to `+00:00` first: `datetime.fromisoformat`
+    only accepts a bare `Z` suffix from Python 3.11 onward, but the schema
+    (`schema.json`) is a contract for non-Python clients too, some of which
+    may write `Z`-suffixed timestamps.
+    """
+    if not isinstance(timestamp, str):
+        return None
+    text = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
+    try:
+        return datetime.fromisoformat(text).date().isoformat()
+    except ValueError:
+        return None
+
+
+def filter_by_period(
+    records: list[dict], since: str | None, until: str | None
+) -> list[dict]:
+    """Keep only records whose UTC calendar date falls within
+    `[since, until]` (both optional `YYYY-MM-DD` strings, inclusive).
+
+    A no-op (returns `records` unchanged) when both bounds are `None`.
+    Otherwise, records with a missing/unparseable `timestamp` can't be
+    placed in the period and are dropped, with a single `warn()` for the
+    whole skip rather than one per record.
+    """
+    if since is None and until is None:
+        return records
+
+    kept = []
+    dropped = 0
+    for record in records:
+        date = parse_date(record.get("timestamp"))
+        if date is None or (since and date < since) or (until and date > until):
+            dropped += 1
+            continue
+        kept.append(record)
+
+    if dropped:
+        warn(
+            f"{dropped} record(s) fell outside --since/--until or lacked a "
+            "usable timestamp and were excluded from this period"
+        )
+    return kept
 
 
 def check_scale(path, record_count: int) -> None:

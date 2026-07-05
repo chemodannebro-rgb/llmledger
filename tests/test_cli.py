@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 
 import pytest
@@ -109,6 +110,78 @@ def test_report_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
 
     assert exit_code == 2
     assert "[llmledger] error:" in captured.err
+
+
+def _write_dated_records(log_path, dates):
+    with log_path.open("w", encoding="utf-8") as fh:
+        for i, d in enumerate(dates):
+            fh.write(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "label": "x",
+                        "model": "gpt-4o",
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cached_input_tokens": 0,
+                        "cost_micros": 100 * (i + 1),
+                        "timestamp": f"{d}T00:00:00+00:00",
+                    }
+                )
+                + "\n"
+            )
+
+
+def test_report_since_until_filters_records(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    _write_dated_records(log_path, ["2026-01-01", "2026-01-15", "2026-02-01"])
+
+    exit_code = main(
+        ["report", "--log-file", str(log_path), "--since", "2026-01-01", "--until", "2026-01-31"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "calls: 2" in captured.out
+
+
+def test_report_since_until_rejects_bad_date_format(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    _write_dated_records(log_path, ["2026-01-01"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["report", "--log-file", str(log_path), "--since", "01/01/2026"])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "must be YYYY-MM-DD" in captured.err
+
+
+def test_dashboard_since_until_filters_records(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    _write_dated_records(log_path, ["2026-01-01", "2026-01-15", "2026-02-01"])
+    out_path = tmp_path / "dash.html"
+
+    exit_code = main(
+        [
+            "dashboard",
+            "--log-file",
+            str(log_path),
+            "--out",
+            str(out_path),
+            "--since",
+            "2026-01-01",
+            "--until",
+            "2026-01-31",
+        ]
+    )
+    capsys.readouterr()
+
+    assert exit_code == 0
+    html = out_path.read_text(encoding="utf-8")
+    assert "Period: 2026-01-01" in html
+    assert "2026-01-31" in html
+    assert "2026-02-01" not in html
 
 
 def test_detect_command_returns_exit_code_1_when_anomalies_found(tmp_path, capsys):
@@ -284,3 +357,40 @@ def test_unexpected_exception_in_handler_returns_exit_code_2(tmp_path, monkeypat
 
     assert exit_code == 2
     assert "[llmledger] error: unexpected error: boom" in captured.err
+
+
+def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):
+    # Patching socket.socket itself catches every stdlib-level network path
+    # (urllib, requests, http.client all eventually construct socket.socket),
+    # without needing to mock each HTTP library separately.
+    def _no_sockets(*args, **kwargs):
+        raise AssertionError("network call attempted")
+
+    monkeypatch.setattr(socket, "socket", _no_sockets)
+
+    log_path = _demo_log(tmp_path, n_normal=200, n_anomalies=10)
+
+    schema_exit = main(["schema"])
+    captured = capsys.readouterr()
+    assert schema_exit == 0
+    assert "unexpected error" not in captured.err
+
+    demo_out = tmp_path / "demo2.jsonl"
+    demo_exit = main(["demo-data", "--out", str(demo_out), "--n-normal", "5", "--n-anomalies", "1"])
+    captured = capsys.readouterr()
+    assert demo_exit == 0
+    assert "unexpected error" not in captured.err
+
+    report_exit = main(["report", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+    assert report_exit == 0
+    assert "unexpected error" not in captured.err
+
+    # No --model-dir with a trained model: latest_version_dir() returns None,
+    # so detect stays on the baseline-only path and never touches skops/sklearn.
+    # demo-data's default n_anomalies=10 means anomalies ARE expected here --
+    # exit code 1 is the correct, non-error outcome, not a failure.
+    detect_exit = main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    captured = capsys.readouterr()
+    assert detect_exit == 1
+    assert "unexpected error" not in captured.err

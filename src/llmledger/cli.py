@@ -1,14 +1,15 @@
 """Command-line interface for llmledger.
 
-Five subcommands:
+Six subcommands:
   report     -- cost summary read back from a log
   demo-data  -- write a synthetic log with a known number of injected anomalies
   detect     -- baseline (+ optional ML cross-check) anomaly detection over a log
   train      -- train an IsolationForest model (requires `llmledger[anomaly]`)
   schema     -- print the packaged JSONL log schema
+  dashboard  -- write a static single-file HTML cost report with a daily journal
 
-`report`/`demo-data`/`schema` never import scikit-learn. `detect` only
-imports it indirectly, via `registry.load_model` deserializing (via
+`report`/`demo-data`/`schema`/`dashboard` never import scikit-learn. `detect`
+only imports it indirectly, via `registry.load_model` deserializing (via
 `skops.io`) an existing model -- if none exists yet, `detect` runs
 baseline-only and never touches scikit-learn either. `train` imports
 `anomaly.train` (which imports
@@ -27,6 +28,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from datetime import date
+from pathlib import Path
 
 from . import __version__
 from ._messages import error, warn
@@ -39,8 +43,9 @@ from .anomaly.features import (
     extract_features,
 )
 from .anomaly.registry import latest_version_dir, load_model
+from .dashboard import render_dashboard
 from .demo_data import DEFAULT_SEED, write_demo_log
-from .logreader import check_scale, iter_log_records
+from .logreader import check_scale, filter_by_period, iter_log_records
 from .tracker import build_report, load_default_pricing
 
 DISCLAIMER = (
@@ -69,6 +74,14 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
+def _date_arg(value: str) -> str:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"must be YYYY-MM-DD, got {value!r}")
+    return value
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     try:
         records = list(iter_log_records(args.log_file))
@@ -77,6 +90,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 2
 
     check_scale(args.log_file, len(records))
+    records = filter_by_period(records, args.since, args.until)
     pricing = (
         _load_pricing_file(args.pricing_file) if args.pricing_file else load_default_pricing()
     )
@@ -84,7 +98,10 @@ def cmd_report(args: argparse.Namespace) -> int:
 
     _print_header(pricing)
     if result["call_count"] == 0:
-        print("no records found in log")
+        if args.since or args.until:
+            print("no records found in the given period")
+        else:
+            print("no records found in log")
         return 0
 
     print(f"calls: {result['call_count']}")
@@ -99,6 +116,36 @@ def cmd_report(args: argparse.Namespace) -> int:
     print("by model:")
     for model, micros in sorted(result["by_model_micros"].items()):
         print(f"  {model}: ${micros / 1_000_000:.6f}")
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    try:
+        records = list(iter_log_records(args.log_file))
+    except FileNotFoundError as exc:
+        error(str(exc))
+        return 2
+
+    check_scale(args.log_file, len(records))
+    records = filter_by_period(records, args.since, args.until)
+    pricing = (
+        _load_pricing_file(args.pricing_file) if args.pricing_file else load_default_pricing()
+    )
+    html = render_dashboard(
+        records, pricing, rub_rate=args.rub_rate, since=args.since, until=args.until
+    )
+
+    try:
+        Path(args.out).write_text(html, encoding="utf-8")
+    except OSError as exc:
+        error(str(exc))
+        return 2
+    # The dashboard carries the same cost/usage data as the source log, so it
+    # gets the same 0600 treatment as the log file (tracker.py) and the model
+    # registry (registry.py) -- not more world-readable than its source.
+    os.chmod(args.out, 0o600)
+
+    print(f"dashboard written to {args.out}")
     return 0
 
 
@@ -324,7 +371,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also show total cost converted to RUB at this fixed, manually-supplied rate "
         "(RUB per USD). No exchange rate is ever fetched over the network.",
     )
+    report_p.add_argument(
+        "--since",
+        type=_date_arg,
+        default=None,
+        help="Only include records on or after this UTC calendar date (YYYY-MM-DD, inclusive)",
+    )
+    report_p.add_argument(
+        "--until",
+        type=_date_arg,
+        default=None,
+        help="Only include records on or before this UTC calendar date (YYYY-MM-DD, inclusive)",
+    )
     report_p.set_defaults(handler=cmd_report)
+
+    dashboard_p = subparsers.add_parser(
+        "dashboard", help="Write a static HTML cost dashboard from a log file"
+    )
+    dashboard_p.add_argument("--log-file", required=True)
+    dashboard_p.add_argument("--out", required=True)
+    dashboard_p.add_argument(
+        "--pricing-file", default=None, help="Override pricing.json with a custom file"
+    )
+    dashboard_p.add_argument(
+        "--rub-rate",
+        type=_positive_float,
+        default=None,
+        help="Also show total cost converted to RUB at this fixed, manually-supplied rate "
+        "(RUB per USD). No exchange rate is ever fetched over the network.",
+    )
+    dashboard_p.add_argument(
+        "--since",
+        type=_date_arg,
+        default=None,
+        help="Only include records on or after this UTC calendar date (YYYY-MM-DD, inclusive)",
+    )
+    dashboard_p.add_argument(
+        "--until",
+        type=_date_arg,
+        default=None,
+        help="Only include records on or before this UTC calendar date (YYYY-MM-DD, inclusive)",
+    )
+    dashboard_p.set_defaults(handler=cmd_dashboard)
 
     demo_p = subparsers.add_parser("demo-data", help="Write a synthetic demo log")
     demo_p.add_argument("--out", required=True)

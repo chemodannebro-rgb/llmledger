@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from importlib import resources
+from pathlib import Path
 
 import jsonschema
 import pytest
 
 from llmledger.tracker import CostTracker
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
@@ -120,3 +123,17 @@ def test_record_with_unknown_field_fails_schema(schema):
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(record, schema)
+
+
+def test_readme_log_format_section_mentions_all_schema_fields(schema):
+    # Guards against the schema and README silently drifting apart: every
+    # field name in schema.json's `properties` must appear somewhere in
+    # README's "## Log format" section, so a newly added/renamed field
+    # doesn't go unmentioned in the human-facing docs.
+    readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    start = readme_text.index("## Log format")
+    end = readme_text.index("\n## ", start + 1)
+    section = readme_text[start:end]
+
+    for name in schema["properties"]:
+        assert name in section, f"{name!r} not mentioned in README's Log format section"

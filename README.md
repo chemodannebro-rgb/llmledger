@@ -71,7 +71,7 @@ at the cheaper cached rate", regardless of provider.
 ## Installation
 
 ```bash
-pip install -e .                       # core only: report, demo-data, detect (baseline), schema
+pip install -e .                       # core only: report, demo-data, detect (baseline), schema, dashboard
 pip install -e ".[anomaly]"            # + train (IsolationForest, requires scikit-learn and skops)
 ```
 
@@ -79,15 +79,21 @@ pip install -e ".[anomaly]"            # + train (IsolationForest, requires scik
 
 | Command | What it does | Exit code |
 |---|---|---|
-| `llmledger report --log-file <path> [--rub-rate <rate>]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate | `0` |
+| `llmledger report --log-file <path> [--rub-rate <rate>] [--since <date>] [--until <date>]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate | `0` |
 | `llmledger demo-data --out <path>` | Write a synthetic log with known injected anomalies | `0` |
 | `llmledger detect --log-file <path> [--model-dir <dir>] [--json]` | Baseline (+ ML if a trained model exists) anomaly detection | `0` clean, `1` anomalies found, `2` error |
 | `llmledger train --log-file <path> --model-dir <dir>` | Train an IsolationForest model (`[anomaly]` extra) | `0` / `2` error |
 | `llmledger schema` | Print the JSONL log schema (`schema.json`) | `0` |
+| `llmledger dashboard --log-file <path> --out <path.html> [--rub-rate <rate>] [--since <date>] [--until <date>]` | Static single-file HTML report with a daily journal | `0` / `2` error |
 
 `--rub-rate` never fetches an exchange rate over the network — you supply
 the number yourself, e.g. `llmledger report --log-file calls.jsonl
 --rub-rate 90`.
+
+`--since`/`--until` (both `YYYY-MM-DD`, inclusive) restrict `report` and
+`dashboard` to records whose UTC calendar date falls in that range; records
+with a missing or unparseable `timestamp` are excluded whenever either bound
+is given.
 
 Exit codes are the entire integration contract — `llmledger` never sends
 notifications itself (no Slack/email/webhook integration, and no such
@@ -101,6 +107,7 @@ llmledger demo-data --out data/sample_logs.jsonl
 llmledger detect --log-file data/sample_logs.jsonl          # baseline only
 llmledger train --log-file data/sample_logs.jsonl --model-dir models
 llmledger detect --log-file data/sample_logs.jsonl --model-dir models   # + ML cross-check
+llmledger dashboard --log-file data/sample_logs.jsonl --out dashboard.html
 ```
 
 A working example registry trained this way is committed at `models/v1/`.
@@ -132,7 +139,14 @@ fields, types, optional fields like `cached_input_tokens`/`trace_id`) is
 `src/llmledger/schema.json`, also available via `llmledger schema`. This is
 the source of truth for any non-Python client (Node.js, Go, ...) that wants
 to write a compatible log — every record also carries `schema_version` for
-future format changes.
+future format changes, plus a UTC `timestamp` (ISO 8601) of when the call
+happened.
+
+Every record needs a `label` (your own name for the call site, e.g.
+`"retrieval"`/`"summarize"`) and a `model` identifier as billed, alongside
+`input_tokens`/`output_tokens`/`cost_micros`. An optional free-form `extra`
+object lets you attach your own metadata (e.g. `workflow_id`) without
+changing the schema.
 
 `cost_micros` is an integer (1 micro = $0.000001), not a float dollar
 amount, to avoid rounding a $0.0025 call down to $0.00 and to avoid
@@ -158,6 +172,15 @@ never makes a network call, never sends a notification, and has no
 optional dependency that would let it (no `requests`, no Slack SDK, etc.).
 Any alerting on top of `detect`'s exit code or `--json` output is your own
 cron job / CI step / monitoring system to build.
+
+This no-network-calls guarantee is checked by
+`test_core_commands_make_no_network_attempts` (`tests/test_cli.py`), which
+patches `socket.socket` to raise if any core command tries to open one.
+
+See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary
+and how to report a vulnerability.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
 ## Development
 

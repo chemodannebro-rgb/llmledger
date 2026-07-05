@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmledger"
-version = "0.2.0"
+version = "0.4.0"
 description = "Local, zero-dependency cost tracking and anomaly detection for LLM/agent calls"
 readme = "README.md"
 license = { text = "MIT" }

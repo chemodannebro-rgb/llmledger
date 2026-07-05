@@ -5,7 +5,7 @@ import json
 import pytest
 
 from llmledger.anomaly.constants import SCALE_WARNING_THRESHOLD
-from llmledger.logreader import check_scale, iter_log_records
+from llmledger.logreader import check_scale, filter_by_period, iter_log_records
 
 
 def _write_lines(path, records):
@@ -118,3 +118,47 @@ def test_check_scale_silent_when_rotation_backups_present(tmp_path, capsys):
     check_scale(path, SCALE_WARNING_THRESHOLD + 1)
     captured = capsys.readouterr()
     assert captured.err == ""
+
+
+def test_filter_by_period_noop_when_both_bounds_none():
+    records = [{"timestamp": "2026-01-01T00:00:00+00:00"}, {"timestamp": "bad"}]
+    assert filter_by_period(records, None, None) is records
+
+
+def test_filter_by_period_inclusive_bounds():
+    records = [
+        {"timestamp": "2026-01-01T00:00:00+00:00", "seq": 1},
+        {"timestamp": "2026-01-15T00:00:00+00:00", "seq": 2},
+        {"timestamp": "2026-01-31T00:00:00+00:00", "seq": 3},
+        {"timestamp": "2026-02-01T00:00:00+00:00", "seq": 4},
+    ]
+    kept = filter_by_period(records, "2026-01-01", "2026-01-31")
+    assert [r["seq"] for r in kept] == [1, 2, 3]
+
+
+def test_filter_by_period_drops_records_without_valid_timestamp_only_when_active(capsys):
+    records = [
+        {"timestamp": "2026-01-01T00:00:00+00:00", "seq": 1},
+        {"timestamp": "not-a-timestamp", "seq": 2},
+        {"seq": 3},
+    ]
+
+    kept_noop = filter_by_period(records, None, None)
+    assert [r["seq"] for r in kept_noop] == [1, 2, 3]
+
+    kept_active = filter_by_period(records, "2026-01-01", None)
+    assert [r["seq"] for r in kept_active] == [1]
+
+
+def test_filter_by_period_warns_once_for_whole_skip(capsys):
+    records = [
+        {"timestamp": "2026-01-01T00:00:00+00:00"},
+        {"timestamp": "not-a-timestamp"},
+        {"timestamp": "also-not-a-timestamp"},
+    ]
+
+    filter_by_period(records, "2026-01-01", None)
+    captured = capsys.readouterr()
+
+    assert captured.err.count("fell outside --since/--until") == 1
+    assert "2 record(s)" in captured.err
