@@ -2,20 +2,18 @@
 
 This document exists so a contributor proposing a change — most notably a
 new dependency — has one place to check the rule against, instead of each
-PR re-deriving it from scratch in its own notes (as `BACKLOG_REVIEW.md`
-found happening independently across several backlog items before this
-file existed).
+PR re-deriving it from scratch in its own notes.
 
 ## The one rule: zero-dependency core, extras-only for everything else
 
 `pyproject.toml` declares `dependencies = []`. Every third-party package
-`llmledger` uses is behind an **optional extra**:
+`llm-burnwatch` uses is behind an **optional extra**:
 
 | Extra | Adds | Used by |
 |---|---|---|
 | *(none — core)* | nothing | `CostTracker`, its SDK-response adapters, `report`, `demo-data`, `detect` (baseline-only), `validate`, `schema`, `dashboard` |
-| `llmledger[anomaly]` | `scikit-learn`, `skops` | `train`; `detect`'s ML cross-check (only once a model has actually been trained) |
-| `llmledger[dev]` | `pytest`, `jsonschema`, `hypothesis` | running the test suite — never imported by any shipped code path |
+| `llm-burnwatch[anomaly]` | `scikit-learn`, `skops` | `train`; `detect`'s ML cross-check (only once a model has actually been trained) |
+| `llm-burnwatch[dev]` | `pytest`, `jsonschema`, `hypothesis` | running the test suite — never imported by any shipped code path |
 
 This is enforced two ways, not just documented:
 
@@ -31,10 +29,10 @@ This is enforced two ways, not just documented:
   from `report`/`demo-data`/`detect`-without-a-model/`validate`/`schema`/
   `dashboard` imports `scikit-learn`/`skops` at module level.
 
-**Checklist for adding a new dependency** (e.g. the LangChain/CrewAI/AutoGen
-adapters proposed in `BACKLOG.md` #7):
+**Checklist for adding a new dependency** (e.g. a hypothetical LangChain/
+CrewAI/AutoGen adapter extra):
 
-1. It goes behind a **new** extra (e.g. `llmledger[langchain]`), never
+1. It goes behind a **new** extra (e.g. `llm-burnwatch[langchain]`), never
    into `dependencies = []` or an existing extra whose users didn't ask
    for it.
 2. The module using it is imported lazily (inside the one function/command
@@ -43,11 +41,26 @@ adapters proposed in `BACKLOG.md` #7):
    uses for `train`/`detect`.
 3. `test_core_commands_make_no_network_attempts` (or an equivalent new
    test, if the new command itself needs network access to be useful —
-   which would itself be a "Requires decision" backlog item, see
-   `BACKLOG.md` #9) must still pass unmodified for every existing core
-   command.
+   which is itself a decision requiring explicit sign-off, see
+   "Network boundaries" below) must still pass unmodified for every
+   existing core command.
 4. The extra is documented in the table above and in README's
    `## Installation` section.
+
+## Network boundaries
+
+The core (see table above) never opens a socket — enforced by
+`test_core_commands_make_no_network_attempts`. As of v0.7.0 there is
+exactly one explicit, opt-in exception:
+
+| Command | Network access | Why it's safe to be an exception |
+|---|---|---|
+| `pricing import <url>` | Fetches a pricing JSON file over `http(s)://` when given a URL (a local file path does not touch the network) | Explicit, one-shot, user-initiated; prints a `warn()` before fetching; not on any path reachable from `report`/`detect`/`dashboard`/`train`/`demo-data`/`validate`/`schema` |
+
+Any future command that needs network access must be added to this table
+and to `test_core_commands_make_no_network_attempts`'s command list (so the
+no-network guarantee stays an enforced fact about the core, not just a
+claim about the whole CLI).
 
 ## Why this rule, not just "keep deps low"
 
@@ -63,7 +76,7 @@ users who actually opted into X.
 ## Module map
 
 ```
-src/llmledger/
+src/llm_burnwatch/
 ├── tracker.py          CostTracker: log_call() + SDK-response adapters
 │                        (openai/anthropic/gemini/ollama), build_report()
 ├── logreader.py         iter_log_records() (rotation + directory-mode
@@ -74,7 +87,7 @@ src/llmledger/
 │                        core-only (no scikit-learn)
 ├── cli.py               argparse wiring for all subcommands
 ├── _messages.py         warn()/error(): the only sanctioned stderr writers
-├── schema.json           JSONL log record contract (also `llmledger schema`)
+├── schema.json           JSONL log record contract (also `llm-burnwatch schema`)
 ├── pricing.json          per-model $/1M-token rates (see PRICING_CHANGELOG.md)
 └── anomaly/
     ├── constants.py      every tunable constant, in one place
@@ -104,6 +117,6 @@ artifacts.
 
 ## Versioning
 
-Semantic versioning (`pyproject.toml` / `src/llmledger/__init__.py`,
+Semantic versioning (`pyproject.toml` / `src/llm_burnwatch/__init__.py`,
 kept in lockstep). See [`CHANGELOG.md`](CHANGELOG.md) for what changed in
 each release.

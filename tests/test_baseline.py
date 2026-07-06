@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from llmledger.anomaly.baseline import analyze, format_score
-from llmledger.anomaly.constants import MIN_GROUP_SAMPLES
+from llm_burnwatch.anomaly.baseline import analyze, format_score
+from llm_burnwatch.anomaly.constants import MIN_GROUP_SAMPLES
 
 
 def _record(label, model, input_tokens, output_tokens, cost_micros):

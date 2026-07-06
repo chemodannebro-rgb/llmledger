@@ -7,14 +7,14 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from llmledger.tracker import CostTracker
+from llm_burnwatch.tracker import CostTracker
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
 def schema():
-    with resources.files("llmledger").joinpath("schema.json").open(
+    with resources.files("llm_burnwatch").joinpath("schema.json").open(
         "r", encoding="utf-8"
     ) as fh:
         return json.load(fh)

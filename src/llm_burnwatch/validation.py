@@ -1,7 +1,7 @@
-"""Lightweight, dependency-free validator for llmledger's JSONL log schema.
+"""Lightweight, dependency-free validator for llm-burnwatch's JSONL log schema.
 
 Deliberately does NOT import the `jsonschema` package (a `[dev]`-only
-dependency -- see ARCHITECTURE.md) so `llmledger validate` stays a core,
+dependency -- see ARCHITECTURE.md) so `llm-burnwatch validate` stays a core,
 zero-dependency command, the same guarantee `report`/`demo-data`/`detect`
 (without a trained model)/`schema`/`dashboard` already give. This module
 understands only the small subset of JSON Schema that `schema.json` actually

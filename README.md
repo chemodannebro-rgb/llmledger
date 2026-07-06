@@ -1,9 +1,10 @@
-# llmledger
+# llm-burnwatch
 
-[![CI](https://github.com/chemodannebro-rgb/llmledger/actions/workflows/ci.yml/badge.svg)](https://github.com/chemodannebro-rgb/llmledger/actions/workflows/ci.yml)
+[![CI](https://github.com/chemodannebro-rgb/llm-burnwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/chemodannebro-rgb/llm-burnwatch/actions/workflows/ci.yml)
 
-> Portfolio / demo engineering project. Not a commercial product — no
-> support, no SLA, use at your own risk.
+> Early stage — API may change before v1.0. Portfolio/demo engineering
+> project: not a commercial product, no support, no SLA, use at your own
+> risk.
 
 Local, zero-dependency cost tracking and statistical anomaly detection for
 LLM/agent calls. Logs go to a plain JSONL file on your own disk; nothing
@@ -15,20 +16,26 @@ platform — whether that's a single JSONL file on one machine, or a small
 team's calls merged from multiple processes via directory mode.
 
 A `dashboard` command also turns that log into a single static HTML file
-(no JS, no external services) — see the CLI table below. It's due for a
-redesign, so no screenshot here yet.
+(no JS, no external services) — see the CLI table below.
+
+![llm-burnwatch dashboard: summary cards, cost totals by label/model, and an
+expandable daily journal with anomaly badges](docs/dashboard.png)
 
 ## Quickstart
 
-Not published to PyPI (portfolio project) — install from a local clone:
+```bash
+pip install llm-burnwatch
+```
+
+Or from a local clone (e.g. to hack on it):
 
 ```bash
-git clone <this-repo> && cd llmledger
+git clone <this-repo> && cd llm-burnwatch
 pip install -e .
 ```
 
 ```python
-from llmledger.tracker import CostTracker
+from llm_burnwatch.tracker import CostTracker
 
 tracker = CostTracker("calls.jsonl")
 tracker.log_call(
@@ -41,18 +48,36 @@ print(tracker.report())
 ```
 
 ```bash
-llmledger report --log-file calls.jsonl
+llm-burnwatch report --log-file calls.jsonl
 ```
 
 That's the whole core: no scikit-learn, no database, one JSONL file you can
 read yourself.
+
+## When NOT to use llm-burnwatch
+
+- **You need full request/response traces or LLM-specific evals** (prompt
+  diffing, golden datasets, human/LLM-graded scoring) — llm-burnwatch only
+  records cost/token metadata per call, not the prompt or completion text.
+  Look at [Langfuse](https://langfuse.com/) instead.
+- **You need a request-routing proxy** (load balancing across API keys/
+  providers, centralized rate limiting, a unified OpenAI-compatible
+  endpoint in front of multiple providers) — llm-burnwatch doesn't sit in the
+  request path at all, it's a logging call you add after the fact. Look at
+  [LiteLLM](https://www.litellm.ai/)'s proxy instead (llm-burnwatch's own
+  `pricing import` command happens to reuse LiteLLM's *pricing data
+  format*, but that's the only connection between the two projects).
+- **You need real-time alerting** (Slack/email/webhook on a cost spike or
+  anomaly) — llm-burnwatch has no notification integration by design (see
+  [System boundaries](#system-boundaries) below); `detect`'s exit code and
+  `--json` output are meant to be wired into your own cron/CI/monitoring.
 
 ## SDK adapters
 
 If you're calling an SDK directly, `CostTracker` has an adapter per
 provider that reads usage straight off the response object (dict or
 attribute-style) — no need to add the provider's SDK as a dependency of
-`llmledger`, and no need to hand-map fields yourself:
+`llm-burnwatch`, and no need to hand-map fields yourself:
 
 ```python
 # OpenAI
@@ -102,24 +127,37 @@ pip install -e ".[anomaly]"            # + train (IsolationForest, requires scik
 
 | Command | What it does | Exit code |
 |---|---|---|
-| `llmledger report --log-file <path> [--rub-rate <rate>] [--since <date>] [--until <date>] [--trace-id <id>] [--json \| --format csv]` | Cost summary (total, by label, by model); `--rub-rate` also shows the total converted to RUB at that fixed, manually-supplied rate; `--trace-id` narrows to one request's calls; `--json` prints a machine-readable summary, `--format csv` prints a normalized 3-column CSV (`dimension,key,cost_usd`) instead — the two are mutually exclusive | `0` |
-| `llmledger demo-data --out <path>` | Write a synthetic log with known injected anomalies | `0` |
-| `llmledger detect --log-file <path> [--model-dir <dir>] [--json]` | Baseline (+ ML if a trained model exists) anomaly detection | `0` clean, `1` anomalies found, `2` error |
-| `llmledger train --log-file <path> --model-dir <dir>` | Train an IsolationForest model (`[anomaly]` extra) | `0` / `2` error |
-| `llmledger schema` | Print the JSONL log schema (`schema.json`) | `0` |
-| `llmledger validate --log-file <path> [--json]` | Check every record against the packaged schema (required fields, types, `minLength`/`minimum`, no unexpected fields) — dependency-free, doesn't use `jsonschema` | `0` clean, `1` invalid records found, `2` error |
-| `llmledger dashboard --log-file <path> --out <path.html> [--rub-rate <rate>] [--since <date>] [--until <date>]` | Static single-file HTML report with a daily journal | `0` / `2` error |
+| `llm-burnwatch report --log-file <path> [--fx-rate <rate> --currency <code>] [--since <date>] [--until <date>] [--trace-id <id>] [--json \| --format csv]` | Cost summary (total, by label, by model); `--fx-rate`/`--currency` also shows the total converted to that currency at a fixed, manually-supplied rate; `--trace-id` narrows to one request's calls; `--json` prints a machine-readable summary, `--format csv` prints a normalized 3-column CSV (`dimension,key,cost_usd`) instead — the two are mutually exclusive | `0` |
+| `llm-burnwatch demo-data --out <path>` | Write a synthetic log with known injected anomalies | `0` |
+| `llm-burnwatch detect --log-file <path> [--model-dir <dir>] [--json]` | Baseline (+ ML if a trained model exists) anomaly detection | `0` clean, `1` anomalies found, `2` error |
+| `llm-burnwatch train --log-file <path> --model-dir <dir>` | Train an IsolationForest model (`[anomaly]` extra) | `0` / `2` error |
+| `llm-burnwatch schema` | Print the JSONL log schema (`schema.json`) | `0` |
+| `llm-burnwatch validate --log-file <path> [--json]` | Check every record against the packaged schema (required fields, types, `minLength`/`minimum`, no unexpected fields) — dependency-free, doesn't use `jsonschema` | `0` clean, `1` invalid records found, `2` error |
+| `llm-burnwatch dashboard --log-file <path> --out <path.html> [--fx-rate <rate> --currency <code>] [--since <date>] [--until <date>]` | Static single-file HTML report with a daily journal | `0` / `2` error |
+| `llm-burnwatch pricing import <file\|url>` | Import pricing from a local file or an `http(s)://` URL in LiteLLM's `model_prices_and_context_window.json` format, saved to `~/.config/llm-burnwatch/pricing.json` | `0` / `2` error |
 
-`--rub-rate` never fetches an exchange rate over the network — you supply
-the number yourself, e.g. `llmledger report --log-file calls.jsonl
---rub-rate 90`.
+`report`/`dashboard`/`detect` all accept `--pricing-file <path>` to use a
+one-off pricing file for that single run. Absent that flag, pricing is
+resolved in this order: the file written by `pricing import` (if any), then
+the packaged default. `pricing import` is the **only** llm-burnwatch command
+that ever makes a network call, and only when given an `http(s)://` URL (a
+local file path never touches the network) — see
+[`SECURITY.md`](SECURITY.md#pricing-import-url-network-trust-boundary) for
+what that does and doesn't protect against, and only import from a source
+you trust.
+
+`--fx-rate`/`--currency` never fetches an exchange rate over the network —
+you supply the rate yourself, e.g. `llm-burnwatch report --log-file calls.jsonl
+--fx-rate 90 --currency RUB`. The older `--rub-rate <rate>` flag still works
+as a RUB-only shorthand for this but is deprecated and will be removed
+before v1.0.
 
 `--since`/`--until` (both `YYYY-MM-DD`, inclusive) restrict `report` and
 `dashboard` to records whose UTC calendar date falls in that range; records
 with a missing or unparseable `timestamp` are excluded whenever either bound
 is given.
 
-Exit codes are the entire integration contract — `llmledger` never sends
+Exit codes are the entire integration contract — `llm-burnwatch` never sends
 notifications itself (no Slack/email/webhook integration, and no such
 dependency in `pyproject.toml`). Wire the exit code and/or `--json` output
 of `detect` into cron, CI, or your own alerting.
@@ -127,14 +165,16 @@ of `detect` into cron, CI, or your own alerting.
 Try it end to end:
 
 ```bash
-llmledger demo-data --out data/sample_logs.jsonl
-llmledger detect --log-file data/sample_logs.jsonl          # baseline only
-llmledger train --log-file data/sample_logs.jsonl --model-dir models
-llmledger detect --log-file data/sample_logs.jsonl --model-dir models   # + ML cross-check
-llmledger dashboard --log-file data/sample_logs.jsonl --out dashboard.html
+llm-burnwatch demo-data --out data/sample_logs.jsonl
+llm-burnwatch detect --log-file data/sample_logs.jsonl          # baseline only
+llm-burnwatch train --log-file data/sample_logs.jsonl --model-dir models
+llm-burnwatch detect --log-file data/sample_logs.jsonl --model-dir models   # + ML cross-check
+llm-burnwatch dashboard --log-file data/sample_logs.jsonl --out dashboard.html
 ```
 
-A working example registry trained this way is committed at `models/v1/`.
+This generates a local model registry under `models/` in a few seconds — it
+isn't committed to the repository (a trained model binary as a trusted
+public artifact is a supply-chain liability; see `SECURITY.md`).
 
 ## Anomaly detection
 
@@ -151,7 +191,7 @@ Two independent, complementary layers:
   trained on the same group-relative features, used as a second opinion
   when a model exists. `detect` also compares current per-group statistics
   against the ones recorded at training time and warns if they've drifted
-  apart, as a signal that `llmledger train` should be re-run.
+  apart, as a signal that `llm-burnwatch train` should be re-run.
 
 Both are diagnostic aids: they flag statistically unusual calls, they don't
 confirm errors, and they can miss real ones. `report`/`detect` print this
@@ -161,7 +201,7 @@ disclaimer, plus the pricing data's `last_updated` date, on every run.
 
 Each line of the log is one JSON object; the full contract (required
 fields, types, optional fields like `cached_input_tokens`/`trace_id`) is
-`src/llmledger/schema.json`, also available via `llmledger schema`. This is
+`src/llm_burnwatch/schema.json`, also available via `llm-burnwatch schema`. This is
 the source of truth for any non-Python client (Node.js, Go, ...) that wants
 to write a compatible log — every record also carries `schema_version` for
 future format changes, plus a UTC `timestamp` (ISO 8601) of when the call
@@ -192,18 +232,25 @@ recommending one of the above.
 
 ## System boundaries
 
-`llmledger` reads and writes local files and prints to stdout/stderr. It
-never makes a network call, never sends a notification, and has no
-optional dependency that would let it (no `requests`, no Slack SDK, etc.).
-Any alerting on top of `detect`'s exit code or `--json` output is your own
-cron job / CI step / monitoring system to build.
+`llm-burnwatch` reads and writes local files and prints to stdout/stderr; it
+never sends a notification and has no optional dependency that would let it
+(no Slack SDK, etc.). `report`/`demo-data`/`schema`/`validate`/`dashboard`/
+`detect`/`train` never make a network call. The one exception is
+`llm-burnwatch pricing import <url>`, which fetches a pricing file over
+`http(s)://` — but only when you explicitly run that command with a URL
+(a local file path never touches the network), and it never runs
+implicitly. Any alerting on top of `detect`'s exit code or `--json` output
+is your own cron job / CI step / monitoring system to build.
 
-This no-network-calls guarantee is checked by
+This no-network-calls guarantee for the rest of the CLI is checked by
 `test_core_commands_make_no_network_attempts` (`tests/test_cli.py`), which
-patches `socket.socket` to raise if any core command tries to open one.
+patches `socket.socket` to raise if any of those commands tries to open
+one; see `ARCHITECTURE.md`'s "Network boundaries" section for the full
+policy on adding future exceptions.
 
-See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary
-and how to report a vulnerability.
+See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary,
+the `pricing import` network trust boundary, and how to report a
+vulnerability.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for version history and
 [`PRICING_CHANGELOG.md`](PRICING_CHANGELOG.md) for `pricing.json`'s own

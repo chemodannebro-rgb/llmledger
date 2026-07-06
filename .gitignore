@@ -11,3 +11,7 @@ data/
 *.jsonl
 *.jsonl.*
 .DS_Store
+BACKLOG.md
+BACKLOG_REVIEW.md
+models/
+CLAUDE.md

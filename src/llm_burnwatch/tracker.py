@@ -27,6 +27,35 @@ def load_default_pricing() -> dict:
         return json.load(fh)
 
 
+def user_pricing_path() -> Path:
+    """Path to the user-level pricing.json written by `llm-burnwatch pricing
+    import` -- `$XDG_CONFIG_HOME/llm-burnwatch/pricing.json` if set, else
+    `~/.config/llm-burnwatch/pricing.json` (this follows the XDG base directory
+    spec on all platforms rather than special-casing macOS/Windows, since
+    the file is a plain-text config, not a native-app resource)."""
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(config_home) if config_home else Path.home() / ".config"
+    return base / "llm-burnwatch" / "pricing.json"
+
+
+def resolve_pricing(explicit_path: str | None = None) -> dict:
+    """Resolve which pricing.json to use, in priority order:
+
+    1. `explicit_path` (e.g. the CLI's `--pricing-file`), if given.
+    2. The user-level config written by `llm-burnwatch pricing import`
+       (`user_pricing_path()`), if it exists.
+    3. The packaged default (`load_default_pricing()`).
+    """
+    if explicit_path:
+        with open(explicit_path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    user_path = user_pricing_path()
+    if user_path.exists():
+        with user_path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    return load_default_pricing()
+
+
 def merge_pricing_overrides(base: dict, overrides: dict[str, dict]) -> dict:
     """Return a new pricing dict: `base` (e.g. `load_default_pricing()`)
     with each `overrides[model]` rate dict layered on top of `base`'s
@@ -132,7 +161,7 @@ class CostTracker:
 
     @staticmethod
     def _build_logger(path: Path, max_bytes: int, backup_count: int) -> logging.Logger:
-        logger_name = f"llmledger.tracker.{path.resolve()}"
+        logger_name = f"llm-burnwatch.tracker.{path.resolve()}"
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.INFO)
         logger.propagate = False

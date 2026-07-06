@@ -19,8 +19,8 @@ pytest.importorskip("hypothesis")
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from llmledger.anomaly.baseline import _median_mad, _score_feature, analyze
-from llmledger.anomaly.constants import MIN_GROUP_SAMPLES, Z_SCORE_THRESHOLD
+from llm_burnwatch.anomaly.baseline import _median_mad, _score_feature, analyze
+from llm_burnwatch.anomaly.constants import MIN_GROUP_SAMPLES, Z_SCORE_THRESHOLD
 
 _finite_floats = st.floats(allow_nan=False, allow_infinity=False, min_value=-1e9, max_value=1e9)
 

@@ -2,7 +2,7 @@
 
 Produces a realistic-looking mixture of calls across a handful of
 (label, model) pairs, with a small, known number of injected anomalies
-(unusually large token counts) so `llmledger detect` has something to find
+(unusually large token counts) so `llm-burnwatch detect` has something to find
 on a first run, and so the internal anomaly sanity test can check that
 detection actually finds them. The seed is fixed by default so demo runs
 and the sanity test are deterministic, not flaky.

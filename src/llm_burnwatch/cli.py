@@ -1,25 +1,27 @@
-"""Command-line interface for llmledger.
+"""Command-line interface for llm-burnwatch.
 
-Seven subcommands:
-  report     -- cost summary read back from a log
-  demo-data  -- write a synthetic log with a known number of injected anomalies
-  detect     -- baseline (+ optional ML cross-check) anomaly detection over a log
-  train      -- train an IsolationForest model (requires `llmledger[anomaly]`)
-  schema     -- print the packaged JSONL log schema
-  validate   -- check a log's records against the packaged JSON schema
-  dashboard  -- write a static single-file HTML cost report with a daily journal
+Eight subcommands:
+  report          -- cost summary read back from a log
+  demo-data       -- write a synthetic log with a known number of injected anomalies
+  detect          -- baseline (+ optional ML cross-check) anomaly detection over a log
+  train           -- train an IsolationForest model (requires `llm-burnwatch[anomaly]`)
+  schema          -- print the packaged JSONL log schema
+  validate        -- check a log's records against the packaged JSON schema
+  dashboard       -- write a static single-file HTML cost report with a daily journal
+  pricing import  -- import pricing data from a local file or http(s):// URL
 
-`report`/`demo-data`/`schema`/`validate`/`dashboard` never import
-scikit-learn. `detect` only imports it indirectly, via `registry.load_model`
-deserializing (via `skops.io`) an existing model -- if none exists yet,
-`detect` runs baseline-only and never touches scikit-learn either. `train`
-imports `anomaly.train` (which imports
-scikit-learn at module level) lazily, inside a try/except, so the
-zero-dependency core guarantee holds for every other command even when
-scikit-learn is not installed.
+`report`/`demo-data`/`schema`/`validate`/`dashboard`/`detect`/`train` never
+make a network call. `detect` only imports scikit-learn indirectly, via
+`registry.load_model` deserializing (via `skops.io`) an existing model -- if
+none exists yet, `detect` runs baseline-only and never touches scikit-learn
+either. `train` imports `anomaly.train` (which imports scikit-learn at module
+level) lazily, inside a try/except, so the zero-dependency core guarantee
+holds for every other command even when scikit-learn is not installed.
+`pricing import <url>` is the sole, explicit, opt-in exception to the
+no-network-by-default rule -- see "Network boundaries" in ARCHITECTURE.md.
 
 Exit codes (a stable contract for cron/alerting integration -- the only
-integration surface llmledger offers; it never sends notifications itself):
+integration surface llm-burnwatch offers; it never sends notifications itself):
   0 -- ran cleanly, no anomalies found (or the command has no anomaly concept)
   1 -- ran cleanly, `detect` found at least one anomalous call
   2 -- execution error (bad path, bad arguments, missing dependency, ...)
@@ -50,10 +52,11 @@ from .anomaly.registry import latest_version_dir, load_model
 from .dashboard import render_dashboard
 from .demo_data import DEFAULT_SEED, write_demo_log
 from .logreader import check_scale, filter_by_period, iter_log_records, parse_date
-from .tracker import build_report, load_default_pricing
+from .pricing_import import PricingImportError, import_pricing
+from .tracker import build_report, resolve_pricing, user_pricing_path
 
 DISCLAIMER = (
-    "llmledger is a diagnostic aid, not a guarantee: it flags statistically "
+    "llm-burnwatch is a diagnostic aid, not a guarantee: it flags statistically "
     "unusual calls, it does not confirm they are errors, and it may miss "
     "real ones. Always use your own judgement before acting on its output."
 )
@@ -66,16 +69,11 @@ def _print_header(pricing: dict) -> None:
         print(f"pricing data last updated: {last_updated}")
 
 
-def _load_pricing_file(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def _print_report_csv(result: dict) -> None:
     """Print `result` as a normalized 3-column CSV: one `total` row (empty
     key), then one row per label, then one row per model, each carrying its
-    own cost in USD. Deliberately ignores `--rub-rate` (documented limitation,
-    not a bug) and skips the human-readable disclaimer/pricing-date header --
+    own cost in USD. Deliberately ignores `--rub-rate`/`--fx-rate` (documented
+    limitation, not a bug) and skips the human-readable disclaimer/pricing-date header --
     this output is meant to be piped into a spreadsheet or another program,
     not read directly, so it stays exactly three columns with no preamble.
     """
@@ -101,6 +99,42 @@ def _date_arg(value: str) -> str:
     except ValueError:
         raise argparse.ArgumentTypeError(f"must be YYYY-MM-DD, got {value!r}")
     return value
+
+
+class _FxError(Exception):
+    """Raised by `_resolve_fx` for an invalid/ambiguous combination of
+    --rub-rate (deprecated) and --fx-rate/--currency."""
+
+
+def _resolve_fx(args: argparse.Namespace):
+    """Resolve --rub-rate (deprecated) and --fx-rate/--currency into a single
+    `(rate, currency, legacy)` tuple, or raise `_FxError` for an invalid
+    combination.
+
+    `legacy=True` means the deprecated --rub-rate path was used and callers
+    must keep its output byte-identical (RUB-only, ``rub_rate``/
+    ``total_cost_rub`` JSON keys) for backward compatibility. `legacy=False`
+    means the generic --fx-rate/--currency path was used (``fx_rate``/
+    ``currency``/``total_cost_fx`` JSON keys). Returns `(None, None, False)`
+    if no conversion was requested at all.
+    """
+    if args.rub_rate is not None and (args.fx_rate is not None or args.currency is not None):
+        raise _FxError(
+            "--rub-rate cannot be combined with --fx-rate/--currency; use --fx-rate/--currency alone"
+        )
+    if args.rub_rate is not None:
+        warn(
+            '--rub-rate is deprecated and will be removed before v1.0; use '
+            '"--fx-rate <rate> --currency RUB" instead'
+        )
+        return args.rub_rate, "RUB", True
+    if args.fx_rate is not None and args.currency is None:
+        raise _FxError("--fx-rate requires --currency")
+    if args.currency is not None and args.fx_rate is None:
+        raise _FxError("--currency requires --fx-rate")
+    if args.fx_rate is not None:
+        return args.fx_rate, args.currency, False
+    return None, None, False
 
 
 def _filter_report_records(records, args, counts: dict) -> Iterator[dict]:
@@ -135,15 +169,19 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 2
 
     try:
+        fx_rate, currency, fx_legacy = _resolve_fx(args)
+    except _FxError as exc:
+        error(str(exc))
+        return 2
+
+    try:
         raw_records = iter_log_records(args.log_file)
     except FileNotFoundError as exc:
         error(str(exc))
         return 2
 
     counts = {"total": 0, "dropped_period": 0}
-    pricing = (
-        _load_pricing_file(args.pricing_file) if args.pricing_file else load_default_pricing()
-    )
+    pricing = resolve_pricing(args.pricing_file)
     result = build_report(_filter_report_records(raw_records, args, counts), pricing)
 
     check_scale(args.log_file, counts["total"])
@@ -172,18 +210,26 @@ def cmd_report(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = dict(result)
-        if args.rub_rate is not None:
-            payload["rub_rate"] = args.rub_rate
-            payload["total_cost_rub"] = result["total_cost_usd"] * args.rub_rate
+        if fx_rate is not None:
+            if fx_legacy:
+                payload["rub_rate"] = fx_rate
+                payload["total_cost_rub"] = result["total_cost_usd"] * fx_rate
+            else:
+                payload["fx_rate"] = fx_rate
+                payload["currency"] = currency
+                payload["total_cost_fx"] = result["total_cost_usd"] * fx_rate
         print(json.dumps(payload, indent=2))
         return 0
 
     _print_header(pricing)
     print(f"calls: {result['call_count']}")
     total_cost_line = f"total cost: ${result['total_cost_usd']:.6f}"
-    if args.rub_rate is not None:
-        rub_total = result["total_cost_usd"] * args.rub_rate
-        total_cost_line += f" (~₽{rub_total:.2f} at {args.rub_rate:.2f} ₽/$)"
+    if fx_rate is not None:
+        fx_total = result["total_cost_usd"] * fx_rate
+        if fx_legacy:
+            total_cost_line += f" (~₽{fx_total:.2f} at {fx_rate:.2f} ₽/$)"
+        else:
+            total_cost_line += f" (~{fx_total:.2f} {currency} at {fx_rate:.2f} {currency}/$)"
     print(total_cost_line)
     print("by label:")
     for label, micros in sorted(result["by_label_micros"].items()):
@@ -196,6 +242,12 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def cmd_dashboard(args: argparse.Namespace) -> int:
     try:
+        fx_rate, currency, fx_legacy = _resolve_fx(args)
+    except _FxError as exc:
+        error(str(exc))
+        return 2
+
+    try:
         records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
         error(str(exc))
@@ -203,12 +255,15 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
 
     check_scale(args.log_file, len(records))
     records = filter_by_period(records, args.since, args.until)
-    pricing = (
-        _load_pricing_file(args.pricing_file) if args.pricing_file else load_default_pricing()
-    )
-    html = render_dashboard(
-        records, pricing, rub_rate=args.rub_rate, since=args.since, until=args.until
-    )
+    pricing = resolve_pricing(args.pricing_file)
+    if fx_legacy:
+        html = render_dashboard(
+            records, pricing, rub_rate=fx_rate, since=args.since, until=args.until
+        )
+    else:
+        html = render_dashboard(
+            records, pricing, fx_rate=fx_rate, currency=currency, since=args.since, until=args.until
+        )
 
     try:
         Path(args.out).write_text(html, encoding="utf-8")
@@ -275,7 +330,7 @@ def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
             warn(
                 "a trained model exists but scikit-learn is not installed; "
                 "skipping ML cross-check. Install with: "
-                'pip install "llmledger[anomaly]"'
+                'pip install "llm-burnwatch[anomaly]"'
             )
             return {"available": False, "reason": "scikit-learn not installed"}
         except ValueError as exc:
@@ -285,7 +340,7 @@ def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
             if attempt == _ML_CROSS_CHECK_LOAD_ATTEMPTS - 1:
                 error(
                     f"could not load model registry at {version_dir}: {exc}. "
-                    "It was likely pruned by a concurrent `llmledger train` "
+                    "It was likely pruned by a concurrent `llm-burnwatch train` "
                     "run. Skipping ML cross-check for this run."
                 )
                 return {"available": False, "reason": str(exc)}
@@ -293,7 +348,7 @@ def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
         except (OSError, json.JSONDecodeError) as exc:
             error(
                 f"could not load model registry at {version_dir}: {exc}. "
-                "Skipping ML cross-check; re-run `llmledger train` to regenerate it."
+                "Skipping ML cross-check; re-run `llm-burnwatch train` to regenerate it."
             )
             return {"available": False, "reason": str(exc)}
 
@@ -328,7 +383,7 @@ def cmd_detect(args: argparse.Namespace) -> int:
         return 2
 
     check_scale(args.log_file, len(records))
-    pricing = load_default_pricing()
+    pricing = resolve_pricing(args.pricing_file)
 
     if not records:
         if args.json:
@@ -419,7 +474,7 @@ def cmd_train(args: argparse.Namespace) -> int:
     except ImportError:
         error(
             "scikit-learn is required for training. Install with: "
-            'pip install "llmledger[anomaly]"'
+            'pip install "llm-burnwatch[anomaly]"'
         )
         return 2
 
@@ -445,6 +500,22 @@ def cmd_train(args: argparse.Namespace) -> int:
     except ValueError as exc:
         error(str(exc))
         return 2
+    except ImportError as exc:
+        # scikit-learn is imported eagerly above, so a bare ImportError here
+        # almost always means the optional "skops" dependency (used lazily by
+        # anomaly/registry.py to persist the trained model) is missing. Only
+        # translate it into the friendly extras-install message when the
+        # missing module is actually one of our optional deps; otherwise
+        # re-raise so unrelated import bugs aren't masked by a misleading
+        # "install llm-burnwatch[anomaly]" message.
+        missing = exc.name or ""
+        if missing == "skops" or missing.startswith("skops.") or missing == "sklearn" or missing.startswith("sklearn."):
+            error(
+                "scikit-learn/skops are required for training. Install with: "
+                'pip install "llm-burnwatch[anomaly]"'
+            )
+            return 2
+        raise
 
     print(f"trained model saved to {version_dir}")
     if eval_metrics["holdout_used"]:
@@ -458,10 +529,21 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pricing_import(args: argparse.Namespace) -> int:
+    dest = user_pricing_path()
+    try:
+        pricing = import_pricing(args.source, dest)
+    except PricingImportError as exc:
+        error(str(exc))
+        return 2
+    print(f"imported {len(pricing['models'])} model(s) to {dest}")
+    return 0
+
+
 def cmd_schema(args: argparse.Namespace) -> int:
     from importlib import resources
 
-    text = resources.files("llmledger").joinpath("schema.json").read_text(encoding="utf-8")
+    text = resources.files("llm_burnwatch").joinpath("schema.json").read_text(encoding="utf-8")
     print(text)
     return 0
 
@@ -477,7 +559,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         error(str(exc))
         return 2
 
-    schema_text = resources.files("llmledger").joinpath("schema.json").read_text(encoding="utf-8")
+    schema_text = resources.files("llm_burnwatch").joinpath("schema.json").read_text(encoding="utf-8")
     schema = json.loads(schema_text)
 
     invalid = []
@@ -507,8 +589,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="llmledger", description=__doc__)
-    parser.add_argument("--version", action="version", version=f"llmledger {__version__}")
+    parser = argparse.ArgumentParser(prog="llm-burnwatch", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"llm-burnwatch {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     report_p = subparsers.add_parser("report", help="Summarize cost from a log file")
@@ -520,8 +602,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--rub-rate",
         type=_positive_float,
         default=None,
-        help="Also show total cost converted to RUB at this fixed, manually-supplied rate "
-        "(RUB per USD). No exchange rate is ever fetched over the network.",
+        help="Deprecated, use --fx-rate/--currency instead. Also show total cost converted "
+        "to RUB at this fixed, manually-supplied rate (RUB per USD). No exchange rate is "
+        "ever fetched over the network.",
+    )
+    report_p.add_argument(
+        "--fx-rate",
+        type=_positive_float,
+        default=None,
+        help="Also show total cost converted to --currency at this fixed, manually-supplied "
+        "rate (units of --currency per USD). Requires --currency. No exchange rate is ever "
+        "fetched over the network.",
+    )
+    report_p.add_argument(
+        "--currency",
+        default=None,
+        help="Currency code to display alongside --fx-rate (e.g. RUB, EUR). Requires --fx-rate.",
     )
     report_p.add_argument(
         "--since",
@@ -550,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format. 'csv' prints a normalized dimension,key,cost_usd table "
         "(total/label/model rows) instead of the human-readable summary; ignores "
-        "--rub-rate and cannot be combined with --json.",
+        "--rub-rate/--fx-rate and cannot be combined with --json.",
     )
     report_p.set_defaults(handler=cmd_report)
 
@@ -566,8 +662,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--rub-rate",
         type=_positive_float,
         default=None,
-        help="Also show total cost converted to RUB at this fixed, manually-supplied rate "
-        "(RUB per USD). No exchange rate is ever fetched over the network.",
+        help="Deprecated, use --fx-rate/--currency instead. Also show total cost converted "
+        "to RUB at this fixed, manually-supplied rate (RUB per USD). No exchange rate is "
+        "ever fetched over the network.",
+    )
+    dashboard_p.add_argument(
+        "--fx-rate",
+        type=_positive_float,
+        default=None,
+        help="Also show total cost converted to --currency at this fixed, manually-supplied "
+        "rate (units of --currency per USD). Requires --currency. No exchange rate is ever "
+        "fetched over the network.",
+    )
+    dashboard_p.add_argument(
+        "--currency",
+        default=None,
+        help="Currency code to display alongside --fx-rate (e.g. RUB, EUR). Requires --fx-rate.",
     )
     dashboard_p.add_argument(
         "--since",
@@ -595,6 +705,9 @@ def build_parser() -> argparse.ArgumentParser:
     detect_p.add_argument("--threshold", type=float, default=Z_SCORE_THRESHOLD)
     detect_p.add_argument("--model-dir", default="models")
     detect_p.add_argument(
+        "--pricing-file", default=None, help="Override pricing.json with a custom file"
+    )
+    detect_p.add_argument(
         "--json", action="store_true", help="Print a machine-readable JSON summary"
     )
     detect_p.set_defaults(handler=cmd_detect)
@@ -620,6 +733,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_p.set_defaults(handler=cmd_validate)
 
+    pricing_p = subparsers.add_parser("pricing", help="Manage local pricing data")
+    pricing_sub = pricing_p.add_subparsers(dest="pricing_command", required=True)
+    pricing_import_p = pricing_sub.add_parser(
+        "import",
+        help="Import pricing from a local file or http(s):// URL in LiteLLM's "
+        "model_prices_and_context_window.json format, saved to a user config file that "
+        "takes priority over the packaged pricing.json for report/dashboard/detect",
+    )
+    pricing_import_p.add_argument(
+        "source", help="Local file path or http(s):// URL to import pricing from"
+    )
+    pricing_import_p.set_defaults(handler=cmd_pricing_import)
+
     return parser
 
 
@@ -631,3 +757,7 @@ def main(argv=None) -> int:
     except Exception as exc:  # unexpected failure -> exit code 2, not a raw traceback
         error(f"unexpected error: {exc}")
         return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

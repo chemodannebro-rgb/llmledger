@@ -1,13 +1,13 @@
 # Contributing
 
-`llmledger` is a portfolio/demo engineering project (see README's opening
+`llm-burnwatch` is a portfolio/demo engineering project (see README's opening
 note — no support, no SLA), but it takes contributions seriously enough to
 write this down instead of leaving it as tribal knowledge.
 
 ## Setup
 
 ```bash
-git clone <this-repo> && cd llmledger
+git clone <this-repo> && cd llm-burnwatch
 pip install -e ".[anomaly,dev]"
 ```
 
@@ -54,14 +54,14 @@ bugs. A past change passed every structural test while shipping a layout
 bug that only showed up when actually rendered in a browser at a narrow
 width.
 
-**Rule:** any change to `src/llmledger/dashboard.py`'s HTML/CSS output
+**Rule:** any change to `src/llm_burnwatch/dashboard.py`'s HTML/CSS output
 must include, in the PR description, at least one real screenshot of the
 generated dashboard at a normal desktop width and one at a narrow
 (mobile-ish, ~375px) width. Generate one with:
 
 ```bash
-llmledger demo-data --out /tmp/demo.jsonl
-llmledger dashboard --log-file /tmp/demo.jsonl --out /tmp/dashboard.html
+llm-burnwatch demo-data --out /tmp/demo.jsonl
+llm-burnwatch dashboard --log-file /tmp/demo.jsonl --out /tmp/dashboard.html
 ```
 
 then open `/tmp/dashboard.html` in a browser, resize, and screenshot. This
@@ -72,7 +72,7 @@ reviewer) actually doing it.
 ## Style
 
 - Match the existing code: docstrings explain *why*, not just *what* (see
-  any module in `src/llmledger/anomaly/` for the pattern).
+  any module in `src/llm_burnwatch/anomaly/` for the pattern).
 - `warn()`/`error()` from `_messages.py` are the only sanctioned
   stderr-writing functions — don't call `print(..., file=sys.stderr)`
   directly (enforced by a grep-based test).
@@ -82,10 +82,12 @@ reviewer) actually doing it.
 ## Versioning
 
 Semantic versioning, kept in lockstep between `pyproject.toml` and
-`src/llmledger/__init__.py`. Document what changed in `CHANGELOG.md` as
+`src/llm_burnwatch/__init__.py`. Document what changed in `CHANGELOG.md` as
 part of the same PR that bumps the version.
 
 ## Security
 
-See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary
-and how to report a vulnerability privately instead of via a public issue.
+See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary,
+the `pricing import` network trust boundary, and how to report a
+vulnerability (there is no private disclosure channel for this project —
+see `SECURITY.md` for what that means in practice).

@@ -5,12 +5,12 @@ from importlib import resources
 
 import pytest
 
-from llmledger.validation import validate_record
+from llm_burnwatch.validation import validate_record
 
 
 @pytest.fixture
 def schema():
-    text = resources.files("llmledger").joinpath("schema.json").read_text(encoding="utf-8")
+    text = resources.files("llm_burnwatch").joinpath("schema.json").read_text(encoding="utf-8")
     return json.loads(text)
 
 

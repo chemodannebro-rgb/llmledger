@@ -1,6 +1,6 @@
 # Pricing changelog
 
-`src/llmledger/pricing.json` carries a single `last_updated` date but no
+`src/llm_burnwatch/pricing.json` carries a single `last_updated` date but no
 record of *what* changed since the previous snapshot. Re-running `report`
 or `dashboard` on the same log after a `pricing.json` update can silently
 change historical totals, with no way to tell why just from the log or the
@@ -8,13 +8,13 @@ tool's output. This file is the append-only record of what changed and
 when, so a `total_cost_usd` that shifts between two runs on an unchanged
 log can always be traced back to a specific rate change here.
 
-**Rule:** any commit that edits `src/llmledger/pricing.json` (a new model,
+**Rule:** any commit that edits `src/llm_burnwatch/pricing.json` (a new model,
 a changed rate, a removed model) must also update `last_updated` in that
 file and add a new dated entry below in the same commit/PR.
 
 ## 2026-06-01 — initial snapshot
 
-Baseline rates as of the `llmledger` v0.1.0 initial release (no prior
+Baseline rates as of the `llm-burnwatch` v0.1.0 initial release (no prior
 history exists before this point).
 
 | Model | Input ($/1M) | Output ($/1M) | Cached input ($/1M) |

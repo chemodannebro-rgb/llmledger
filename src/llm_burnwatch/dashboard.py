@@ -27,7 +27,7 @@ _DAY_BAR_HEIGHT = 14
 # Duplicated from cli.DISCLAIMER rather than imported from it, to avoid a
 # circular import (cli.py imports this module for cmd_dashboard).
 _DASHBOARD_DISCLAIMER = (
-    "llmledger is a diagnostic aid, not a guarantee: it flags statistically "
+    "llm-burnwatch is a diagnostic aid, not a guarantee: it flags statistically "
     "unusual calls, it does not confirm they are errors, and it may miss "
     "real ones. Always use your own judgement before acting on its output."
 )
@@ -152,12 +152,20 @@ def render_dashboard(
     pricing: dict,
     *,
     rub_rate: float | None = None,
+    fx_rate: float | None = None,
+    currency: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ) -> str:
     """Render a self-contained HTML dashboard for `records`, priced with
-    `pricing`. If `rub_rate` is given, also show the total converted to RUB
-    at that fixed, manually-supplied rate (never fetched over the network).
+    `pricing`.
+
+    `rub_rate` is the deprecated RUB-only conversion path, kept for backward
+    compatibility with existing direct callers -- its output is unchanged.
+    `fx_rate`/`currency` is the generic replacement (any currency, shown by
+    its ISO code, e.g. "90.00 RUB"); pass at most one of the two. Neither
+    rate is ever fetched over the network -- both are fixed, manually
+    supplied values.
 
     `since`/`until` are assumed to have already been applied to `records` by
     the caller (see `logreader.filter_by_period`) -- they are only used here
@@ -179,6 +187,9 @@ def render_dashboard(
     if rub_rate is not None:
         rub_total = report["total_cost_usd"] * rub_rate
         total_cost_line += f" (~\u20bd{rub_total:.2f} at {rub_rate:.2f} \u20bd/$)"
+    elif fx_rate is not None:
+        fx_total = report["total_cost_usd"] * fx_rate
+        total_cost_line += f" (~{fx_total:.2f} {currency} at {fx_rate:.2f} {currency}/$)"
 
     last_updated = pricing.get("last_updated")
     last_updated_line = (
@@ -187,7 +198,7 @@ def render_dashboard(
         else ""
     )
 
-    title = f"llmledger dashboard \u2014 {period_line[len('Period: '):]}"
+    title = f"llm-burnwatch dashboard \u2014 {period_line[len('Period: '):]}"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -243,7 +254,7 @@ th {{ background: #f0f0f0; }}
 </style>
 </head>
 <body>
-<h1>llmledger dashboard</h1>
+<h1>llm-burnwatch dashboard</h1>
 <p class="disclaimer">{html.escape(_DASHBOARD_DISCLAIMER)}</p>
 <p class="period">{html.escape(period_line)}</p>
 {last_updated_line}

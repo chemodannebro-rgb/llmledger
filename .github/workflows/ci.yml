@@ -17,9 +17,9 @@ jobs:
         run: pip install .
       - name: Verify zero-dependency commands work without scikit-learn
         run: |
-          llmledger schema
-          llmledger demo-data --out /tmp/demo.jsonl
-          llmledger report --log-file /tmp/demo.jsonl
+          llm-burnwatch schema
+          llm-burnwatch demo-data --out /tmp/demo.jsonl
+          llm-burnwatch report --log-file /tmp/demo.jsonl
           # demo-data always injects synthetic anomalies, so `detect` finding
           # them (exit 1) is the *expected*, correct outcome here -- this
           # smoke test only cares that the command runs without crashing
@@ -27,7 +27,7 @@ jobs:
           # required here: this step runs under `bash -e`, which would
           # otherwise abort on `detect`'s exit 1 before `code=$?` ever runs.
           set +e
-          llmledger detect --log-file /tmp/demo.jsonl
+          llm-burnwatch detect --log-file /tmp/demo.jsonl
           code=$?
           set -e
           if [ "$code" -eq 2 ]; then
@@ -39,10 +39,12 @@ jobs:
     name: Full install + tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        # requires-python in pyproject.toml is ">=3.9"; test both ends of
-        # that range rather than every intermediate version.
-        python-version: ["3.9", "3.12"]
+        # requires-python in pyproject.toml is ">=3.9"; cover the full
+        # supported range so a [anomaly]-extra wheel gap on a newer
+        # CPython (scikit-learn/skops) is caught here, not by a user.
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,12 +54,12 @@ jobs:
         run: pip install -e ".[anomaly,dev]"
       - name: Run tests
         run: pytest tests/ -v
-      - name: Extract llmledger's own declared dependencies for audit
+      - name: Extract llm-burnwatch's own declared dependencies for audit
         # Scoped to what pyproject.toml actually declares (core `dependencies`
         # + the `anomaly` extra, i.e. scikit-learn) rather than auditing every
         # package in this CI environment: pytest, pip itself, and pip-audit's
         # own transitive deps (requests, urllib3, filelock, msgpack, ...) are
-        # dev/test/tooling, not something llmledger ships to users, and their
+        # dev/test/tooling, not something llm-burnwatch ships to users, and their
         # CVEs churn independently of this project.
         run: |
           pip install tomli

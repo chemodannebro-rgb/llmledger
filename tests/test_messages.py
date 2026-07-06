@@ -1,5 +1,5 @@
 """Enforces that all user-facing stderr output goes through
-``llmledger._messages.warn``/``error`` instead of ad-hoc
+``llm_burnwatch._messages.warn``/``error`` instead of ad-hoc
 ``print(..., file=sys.stderr)`` or ``warnings.warn`` calls.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "llmledger"
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "llm_burnwatch"
 
 # Files allowed to reference stderr/warnings directly (the single sanctioned
 # implementation of warn()/error()).
@@ -43,10 +43,10 @@ def test_no_direct_stderr_writes_outside_messages_module():
 
 
 def test_warn_and_error_use_expected_prefix(capsys):
-    from llmledger._messages import warn, error
+    from llm_burnwatch._messages import warn, error
 
     warn("something happened")
     error("something failed")
     captured = capsys.readouterr()
-    assert "[llmledger] warning: something happened" in captured.err
-    assert "[llmledger] error: something failed" in captured.err
+    assert "[llm-burnwatch] warning: something happened" in captured.err
+    assert "[llm-burnwatch] error: something failed" in captured.err

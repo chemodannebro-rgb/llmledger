@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from llmledger.cli import DISCLAIMER, _filter_report_records, main
-from llmledger.demo_data import write_demo_log
-from llmledger.tracker import CostTracker
+from llm_burnwatch.cli import DISCLAIMER, _filter_report_records, main
+from llm_burnwatch.demo_data import write_demo_log
+from llm_burnwatch.tracker import CostTracker
 
 
 def _demo_log(tmp_path, **kwargs):
@@ -25,7 +25,7 @@ def test_schema_command_prints_valid_json_matching_packaged_schema(capsys):
     schema = json.loads(captured.out)
 
     assert exit_code == 0
-    assert schema["title"] == "llmledger JSONL log record"
+    assert schema["title"] == "llm-burnwatch JSONL log record"
 
 
 def test_validate_command_on_valid_demo_log_reports_all_valid(tmp_path, capsys):
@@ -84,7 +84,7 @@ def test_validate_command_missing_log_file_returns_exit_code_2(tmp_path, capsys)
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
 
 
 def test_demo_data_command_writes_log_and_reports_count(tmp_path, capsys):
@@ -171,7 +171,7 @@ def test_report_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
 
 
 def _write_dated_records(log_path, dates):
@@ -471,7 +471,7 @@ def test_detect_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
 
 
 def test_train_command_empty_log_returns_exit_code_2(tmp_path, capsys):
@@ -483,7 +483,7 @@ def test_train_command_empty_log_returns_exit_code_2(tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
 
 
 def test_train_then_detect_uses_trained_model(tmp_path, capsys):
@@ -570,7 +570,7 @@ def test_detect_retries_ml_cross_check_when_latest_version_pruned_mid_resolve(
     # and `load_model()` reading it.
     shutil.rmtree(stale_dir)
 
-    import llmledger.cli as cli_module
+    import llm_burnwatch.cli as cli_module
 
     real_latest_version_dir = cli_module.latest_version_dir
     calls = {"n": 0}
@@ -614,18 +614,18 @@ def test_detect_survives_missing_metadata_json_and_still_reports_baseline(tmp_pa
     assert exit_code == 1
     assert payload["anomaly_count"] > 0  # baseline result still computed and reported
     assert payload["ml"]["available"] is False
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
 
 
 def test_train_command_missing_sklearn_returns_exit_code_2(tmp_path, capsys, monkeypatch):
-    monkeypatch.setitem(sys.modules, "llmledger.anomaly.train", None)
+    monkeypatch.setitem(sys.modules, "llm_burnwatch.anomaly.train", None)
     log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
 
     exit_code = main(["train", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert 'pip install "llmledger[anomaly]"' in captured.err
+    assert 'pip install "llm-burnwatch[anomaly]"' in captured.err
 
 
 def test_detect_command_skips_ml_cross_check_when_sklearn_missing(tmp_path, capsys, monkeypatch):
@@ -638,7 +638,7 @@ def test_detect_command_skips_ml_cross_check_when_sklearn_missing(tmp_path, caps
     def _raise_import_error(version_dir):
         raise ImportError("No module named 'sklearn'")
 
-    monkeypatch.setattr("llmledger.cli.load_model", _raise_import_error)
+    monkeypatch.setattr("llm_burnwatch.cli.load_model", _raise_import_error)
 
     exit_code = main(["detect", "--log-file", str(log_path), "--model-dir", str(model_dir), "--json"])
     captured = capsys.readouterr()
@@ -656,12 +656,12 @@ def test_unexpected_exception_in_handler_returns_exit_code_2(tmp_path, monkeypat
     # cmd_report only catches FileNotFoundError explicitly; any other
     # exception should be caught generically by main()'s top-level handler
     # rather than crash with a raw traceback.
-    monkeypatch.setattr("llmledger.cli.iter_log_records", _boom)
+    monkeypatch.setattr("llm_burnwatch.cli.iter_log_records", _boom)
     exit_code = main(["report", "--log-file", str(tmp_path / "x.jsonl")])
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error: unexpected error: boom" in captured.err
+    assert "[llm-burnwatch] error: unexpected error: boom" in captured.err
 
 
 def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):

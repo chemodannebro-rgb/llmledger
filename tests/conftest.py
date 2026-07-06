@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from llmledger.tracker import CostTracker
+from llm_burnwatch.tracker import CostTracker
 
 
 @pytest.fixture(autouse=True)

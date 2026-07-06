@@ -5,7 +5,7 @@ model registry (`registry.py`).
 zero-dependency core guarantee because this module is only ever imported
 from `cli.py`'s `train` command handler inside a `try/except ImportError`
 block -- nothing on the `report`/`demo-data`/`detect`-without-a-model code
-path imports `llmledger.anomaly.train`.
+path imports `llm-burnwatch.anomaly.train`.
 """
 
 from __future__ import annotations

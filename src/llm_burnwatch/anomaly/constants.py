@@ -1,4 +1,4 @@
-"""Single place for every tunable constant used across llmledger.
+"""Single place for every tunable constant used across llm-burnwatch.
 
 These are intentionally NOT exposed as CLI flags / config file options:
 each one is either a statistical-soundness parameter (not a matter of taste)

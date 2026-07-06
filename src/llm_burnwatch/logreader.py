@@ -1,4 +1,4 @@
-"""Safe reading of llmledger JSONL logs.
+"""Safe reading of llm-burnwatch JSONL logs.
 
 Handles three realistic complications that a naive `open(path).readlines()`
 would not:

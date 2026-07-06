@@ -6,10 +6,10 @@ import pytest
 
 pytest.importorskip("sklearn")
 
-from llmledger.anomaly.constants import EVAL_HOLDOUT_MIN_EXAMPLES, MIN_GROUP_SAMPLES
-from llmledger.anomaly.train import train
-from llmledger.demo_data import write_demo_log
-from llmledger.tracker import CostTracker
+from llm_burnwatch.anomaly.constants import EVAL_HOLDOUT_MIN_EXAMPLES, MIN_GROUP_SAMPLES
+from llm_burnwatch.anomaly.train import train
+from llm_burnwatch.demo_data import write_demo_log
+from llm_burnwatch.tracker import CostTracker
 
 
 def _records(tmp_path, n_normal, n_anomalies=0):
@@ -77,7 +77,7 @@ def test_train_holdout_is_deterministic_across_runs(tmp_path):
 
 
 def test_train_final_model_is_trained_on_full_dataset_not_just_holdout_split(tmp_path):
-    from llmledger.anomaly.features import extract_features
+    from llm_burnwatch.anomaly.features import extract_features
 
     records = _records(tmp_path, n_normal=200, n_anomalies=10)
     X, _kept = extract_features(records)

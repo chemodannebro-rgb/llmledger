@@ -6,7 +6,7 @@ import stat
 
 import pytest
 
-from llmledger.anomaly.registry import (
+from llm_burnwatch.anomaly.registry import (
     latest_version_dir,
     load_model,
     save_model,

@@ -5,10 +5,10 @@ import stat
 
 import pytest
 
-from llmledger.cli import main
-from llmledger.dashboard import render_dashboard
-from llmledger.demo_data import write_demo_log
-from llmledger.tracker import build_report, load_default_pricing
+from llm_burnwatch.cli import main
+from llm_burnwatch.dashboard import render_dashboard
+from llm_burnwatch.demo_data import write_demo_log
+from llm_burnwatch.tracker import build_report, load_default_pricing
 
 
 def _write_records(log_path, records):
@@ -314,7 +314,7 @@ def test_dashboard_cli_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "[llmledger] error:" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
     assert not out_path.exists()
 
 

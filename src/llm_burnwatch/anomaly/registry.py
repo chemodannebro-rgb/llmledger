@@ -136,7 +136,7 @@ def load_model(version_dir) -> tuple[Any, dict]:
     deserialization. On success, prints a warning reminding the caller to
     only load models from a trusted source, plus a separate warning if the
     metadata's `package_version` differs from the currently installed
-    llmledger version (feature engineering may have changed between
+    llm-burnwatch version (feature engineering may have changed between
     versions).
     """
     import skops.io as sio
@@ -154,7 +154,7 @@ def load_model(version_dir) -> tuple[Any, dict]:
         raise ValueError(
             f"model file {model_path} failed integrity check (sha256 "
             "mismatch); it may be corrupted or was substituted. Refusing "
-            "to load. Re-run `llmledger train` to regenerate it."
+            "to load. Re-run `llm-burnwatch train` to regenerate it."
         )
 
     untrusted_types = sio.get_untrusted_types(file=model_path)
@@ -162,8 +162,8 @@ def load_model(version_dir) -> tuple[Any, dict]:
         raise ValueError(
             f"model file {model_path} contains untrusted type(s) "
             f"{untrusted_types}; refusing to load. This should not happen "
-            "for a model produced by `llmledger train` -- it may indicate "
-            "tampering. Re-run `llmledger train` to regenerate it."
+            "for a model produced by `llm-burnwatch train` -- it may indicate "
+            "tampering. Re-run `llm-burnwatch train` to regenerate it."
         )
 
     warn(
@@ -176,9 +176,9 @@ def load_model(version_dir) -> tuple[Any, dict]:
 
     if metadata.get("package_version") != PACKAGE_VERSION:
         warn(
-            f"model was trained with llmledger {metadata.get('package_version')!r}, "
+            f"model was trained with llm-burnwatch {metadata.get('package_version')!r}, "
             f"currently installed is {PACKAGE_VERSION!r}; feature engineering "
-            "may have changed. Consider running `llmledger train` again."
+            "may have changed. Consider running `llm-burnwatch train` again."
         )
 
     model = sio.load(model_path, trusted=[])

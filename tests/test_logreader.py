@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from llmledger.anomaly.constants import SCALE_WARNING_THRESHOLD
-from llmledger.logreader import check_scale, filter_by_period, iter_log_records
+from llm_burnwatch.anomaly.constants import SCALE_WARNING_THRESHOLD
+from llm_burnwatch.logreader import check_scale, filter_by_period, iter_log_records
 
 
 def _write_lines(path, records):

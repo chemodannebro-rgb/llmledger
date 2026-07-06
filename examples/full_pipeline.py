@@ -4,11 +4,11 @@ dashboard -> ML training -> ML-assisted detection.
 Everything through step 3 (writing the dashboard) works with only the core
 package installed. Steps 4-5 require the optional ML extra:
 
-    pip install "llmledger[anomaly]"
+    pip install "llm-burnwatch[anomaly]"
 
 If scikit-learn isn't installed, this script still runs to completion --
 it just skips the ML steps and explains how to enable them, the same way
-`llmledger detect` degrades gracefully when no trained model is available.
+`llm-burnwatch detect` degrades gracefully when no trained model is available.
 
     python examples/full_pipeline.py
 """
@@ -18,20 +18,20 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from llmledger.anomaly.baseline import analyze, format_score
-from llmledger.dashboard import render_dashboard
-from llmledger.demo_data import write_demo_log
-from llmledger.logreader import filter_by_period, iter_log_records, parse_date
-from llmledger.tracker import load_default_pricing
+from llm_burnwatch.anomaly.baseline import analyze, format_score
+from llm_burnwatch.dashboard import render_dashboard
+from llm_burnwatch.demo_data import write_demo_log
+from llm_burnwatch.logreader import filter_by_period, iter_log_records, parse_date
+from llm_burnwatch.tracker import load_default_pricing
 
 
 def main() -> None:
-    work_dir = Path(tempfile.mkdtemp(prefix="llmledger-pipeline-"))
+    work_dir = Path(tempfile.mkdtemp(prefix="llm-burnwatch-pipeline-"))
     log_file = work_dir / "calls.jsonl"
     model_dir = work_dir / "models"
 
     # 1. Generate a synthetic log via a real CostTracker (same code path as
-    #    `llmledger demo-data`): 200 normal calls plus 10 injected outliers.
+    #    `llm-burnwatch demo-data`): 200 normal calls plus 10 injected outliers.
     write_demo_log(log_file, n_normal=200, n_anomalies=10)
     records = list(iter_log_records(log_file))
     print(f"logged {len(records)} demo call(s) to {log_file}")
@@ -48,7 +48,7 @@ def main() -> None:
             if score.is_anomalous:
                 print(f"      {format_score(score)}")
 
-    # 3. Write a static HTML dashboard, the same output `llmledger dashboard`
+    # 3. Write a static HTML dashboard, the same output `llm-burnwatch dashboard`
     #    produces. All the demo calls were logged just now, so they share one
     #    UTC calendar date -- `--since`/`--until` (here via
     #    `filter_by_period`/`parse_date` directly, the same helpers the CLI
@@ -63,16 +63,16 @@ def main() -> None:
     print(f"\nwrote dashboard for {today} ({len(scoped_records)} call(s)) to {dashboard_path}")
 
     # 4. Train an IsolationForest as a second, ML-based opinion. This is the
-    #    one part of llmledger that needs scikit-learn, so the import is
+    #    one part of llm-burnwatch that needs scikit-learn, so the import is
     #    deliberately deferred to here and guarded -- the rest of this
     #    script (and the rest of the package) never imports it at module
     #    level.
     try:
-        from llmledger.anomaly.train import train
+        from llm_burnwatch.anomaly.train import train
     except ImportError:
         print(
             '\nscikit-learn not installed; skipping ML training/detection. '
-            'Install with: pip install "llmledger[anomaly]"'
+            'Install with: pip install "llm-burnwatch[anomaly]"'
         )
         return
 
@@ -87,8 +87,8 @@ def main() -> None:
         print(f"held-out eval skipped: {eval_metrics['reason']}")
 
     # 5. Load the trained model back and cross-check the same log with it.
-    from llmledger.anomaly.features import extract_features
-    from llmledger.anomaly.registry import load_model
+    from llm_burnwatch.anomaly.features import extract_features
+    from llm_burnwatch.anomaly.registry import load_model
 
     model, metadata = load_model(version_dir)
     X, kept_indices = extract_features(records)

@@ -1,6 +1,6 @@
 # Security policy
 
-`llmledger` is a portfolio / demo engineering project, not a commercial
+`llm-burnwatch` is a portfolio / demo engineering project, not a commercial
 product — there is no SLA, but reports are still welcome.
 
 ## Reporting a vulnerability
@@ -11,15 +11,15 @@ project; treat any issue you open as public from the start.
 
 ## Model registry trust boundary
 
-`llmledger train` (the `[anomaly]` extra) writes a versioned model registry
+`llm-burnwatch train` (the `[anomaly]` extra) writes a versioned model registry
 under `models/vN/`: a `model.skops` file plus a `metadata.json` recording,
-among other things, a sha256 hash of `model.skops`. `llmledger detect` reads
+among other things, a sha256 hash of `model.skops`. `llm-burnwatch detect` reads
 this registry back for its ML cross-check.
 
 What this protects against:
 
 - **Corruption or accidental substitution.** `load_model()`
-  (`src/llmledger/anomaly/registry.py`) recomputes the sha256 of
+  (`src/llm_burnwatch/anomaly/registry.py`) recomputes the sha256 of
   `model.skops` and refuses to load if it doesn't match `metadata.json`.
 - **Arbitrary code execution via deserialization.** Models are serialized
   with `skops.io`, not `pickle`. Unlike `pickle`, `skops` refuses by
@@ -30,12 +30,12 @@ What this protects against:
 What this does **not** protect against:
 
 - **A coordinated substitution by the same author/commit.** If whoever
-  controls the repository (or the CI job that runs `llmledger train`)
+  controls the repository (or the CI job that runs `llm-burnwatch train`)
   replaces `model.skops` with a different model trained on different data,
   they can simply recompute the sha256 and write the new, matching value
   into `metadata.json` at the same time. The integrity check only detects
   a mismatch between the two files — it cannot tell a legitimate
-  `llmledger train` run from a malicious one by the same party, because
+  `llm-burnwatch train` run from a malicious one by the same party, because
   both produce an internally consistent pair of files.
 
 This is a root-of-trust limitation, not a bug: no purely local, code-level
@@ -48,4 +48,26 @@ resolve. `load_model()` prints a warning to this effect every time it loads
 a model, as a reminder to only load registries from a source you trust.
 
 See also the [System boundaries](README.md#system-boundaries) section of
-the README for `llmledger`'s no-network-calls guarantee.
+the README for `llm-burnwatch`'s no-network-calls guarantee.
+
+## `pricing import <url>` network trust boundary
+
+`llm-burnwatch pricing import <source>` is the one explicit, opt-in exception
+to the no-network-calls guarantee above (see "Network boundaries" in
+`ARCHITECTURE.md`). It never runs implicitly — only when you invoke this
+exact subcommand with a URL.
+
+What it does: fetches `<source>` over `http(s)://` (a 10 second timeout, a
+10 MB response cap, and rejection of any other URL scheme such as `file://`),
+parses it strictly as JSON (rejecting `Infinity`/`NaN`/non-object payloads),
+extracts only numeric cost-per-token fields, and writes the result to
+`~/.config/llm-burnwatch/pricing.json`. The fetched content is never executed —
+it is read as data (numbers keyed by model name), the same way `report`/
+`dashboard`/`detect` already read the packaged `pricing.json`.
+
+What you're trusting when you run it: the content at the URL you supply.
+Only import from a source you trust — a malicious or compromised URL could
+supply inflated or deflated per-model rates, which would silently skew every
+future `report`/`dashboard`/`detect` cost calculation until you re-import a
+correct file or delete `~/.config/llm-burnwatch/pricing.json`. This is a data
+(pricing accuracy) risk, not a code-execution risk.

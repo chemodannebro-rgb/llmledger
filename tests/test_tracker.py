@@ -6,8 +6,8 @@ import stat
 
 import pytest
 
-from llmledger.logreader import iter_log_records
-from llmledger.tracker import CostTracker, load_default_pricing, merge_pricing_overrides
+from llm_burnwatch.logreader import iter_log_records
+from llm_burnwatch.tracker import CostTracker, load_default_pricing, merge_pricing_overrides
 
 
 def test_log_call_basic_and_report(tmp_path):

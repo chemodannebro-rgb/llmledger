@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from llmledger.anomaly.baseline import analyze
-from llmledger.demo_data import write_demo_log
+from llm_burnwatch.anomaly.baseline import analyze
+from llm_burnwatch.demo_data import write_demo_log
 
 N_ANOMALIES = 10
 N_NORMAL = 200
@@ -52,9 +52,9 @@ def test_baseline_detector_finds_all_injected_anomalies_with_few_false_positives
 def test_ml_detector_finds_all_injected_anomalies(tmp_path):
     pytest.importorskip("sklearn")
 
-    from llmledger.anomaly.features import extract_features
-    from llmledger.anomaly.registry import load_model
-    from llmledger.anomaly.train import train
+    from llm_burnwatch.anomaly.features import extract_features
+    from llm_burnwatch.anomaly.registry import load_model
+    from llm_burnwatch.anomaly.train import train
 
     records, is_anomaly = _generate(tmp_path)
     version_dir, _eval_metrics = train(records, model_dir=tmp_path / "models")

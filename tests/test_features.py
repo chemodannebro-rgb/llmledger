@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import math
 
-from llmledger.anomaly.baseline import FEATURES
-from llmledger.anomaly.constants import DRIFT_MULTIPLIER, EXTREME_Z_SENTINEL, MIN_GROUP_SAMPLES
-from llmledger.anomaly.features import (
+from llm_burnwatch.anomaly.baseline import FEATURES
+from llm_burnwatch.anomaly.constants import DRIFT_MULTIPLIER, EXTREME_Z_SENTINEL, MIN_GROUP_SAMPLES
+from llm_burnwatch.anomaly.features import (
     check_label_cardinality,
     compute_reference_stats,
     detect_drift,

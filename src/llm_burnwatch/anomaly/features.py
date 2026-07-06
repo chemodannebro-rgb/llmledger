@@ -129,7 +129,7 @@ def detect_drift(current_stats: dict, reference_stats: dict) -> list[str]:
     of human-readable warning messages for any (label, model) group whose
     current MAD has grown by more than `DRIFT_MULTIPLIER` relative to the
     reference MAD -- a sign the trained model may no longer reflect the
-    data and `llmledger train` should be re-run.
+    data and `llm-burnwatch train` should be re-run.
 
     Only groups present in both are compared; new groups (no reference yet)
     are silently skipped rather than flagged as drift.
@@ -154,6 +154,6 @@ def detect_drift(current_stats: dict, reference_stats: dict) -> list[str]:
                     f"drift detected for group {key!r} feature '{feature}': "
                     f"current MAD={current['mad']:.2f} vs. reference "
                     f"MAD={reference['mad']:.2f} (train a new model with "
-                    "'llmledger train' if this is expected)"
+                    "'llm-burnwatch train' if this is expected)"
                 )
     return messages

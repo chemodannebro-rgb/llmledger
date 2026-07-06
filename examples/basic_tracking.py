@@ -1,6 +1,6 @@
 """Minimal CostTracker usage: no anomaly detection, no scikit-learn.
 
-Run with only the core package installed (`pip install llmledger`, no
+Run with only the core package installed (`pip install llm-burnwatch`, no
 extras) -- this is the "zero-dependency core" guarantee in action.
 
     python examples/basic_tracking.py
@@ -11,11 +11,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from llmledger.tracker import CostTracker
+from llm_burnwatch.tracker import CostTracker
 
 
 def main() -> None:
-    log_dir = Path(tempfile.mkdtemp(prefix="llmledger-basic-"))
+    log_dir = Path(tempfile.mkdtemp(prefix="llm-burnwatch-basic-"))
     log_file = log_dir / "calls.jsonl"
     tracker = CostTracker(log_file)
 
@@ -52,7 +52,7 @@ def main() -> None:
     # matching log_*_response() adapter extracts usage (including cache
     # fields, where the provider has them) straight from the SDK's response
     # object -- no need to add openai/anthropic/google-genai/ollama as a
-    # dependency of llmledger, or to hand-map fields yourself:
+    # dependency of llm-burnwatch, or to hand-map fields yourself:
     #
     #   response = openai_client.chat.completions.create(...)
     #   tracker.log_openai_response(response, label="chat")
@@ -79,10 +79,10 @@ def main() -> None:
     # into a static HTML dashboard -- see examples/full_pipeline.py for the
     # dashboard call made directly from Python:
     #
-    #   llmledger report --log-file {log_file} --since 2026-01-01 --until 2026-01-31
-    #   llmledger dashboard --log-file {log_file} --out dashboard.html
-    print(f"\ntry: llmledger report --log-file {log_file}")
-    print(f"try: llmledger dashboard --log-file {log_file} --out dashboard.html")
+    #   llm-burnwatch report --log-file {log_file} --since 2026-01-01 --until 2026-01-31
+    #   llm-burnwatch dashboard --log-file {log_file} --out dashboard.html
+    print(f"\ntry: llm-burnwatch report --log-file {log_file}")
+    print(f"try: llm-burnwatch dashboard --log-file {log_file} --out dashboard.html")
 
 
 if __name__ == "__main__":

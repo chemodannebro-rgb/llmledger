@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/chemodannebro-rgb/llmledger/schema.json",
-  "title": "llmledger JSONL log record",
-  "description": "One line of an llmledger log file is exactly one JSON object matching this schema. This is the source-of-truth contract for any client (Python or otherwise, e.g. Node.js/Go agents) that wants to write logs compatible with `llmledger report`/`detect`.",
+  "$id": "https://github.com/chemodannebro-rgb/llm-burnwatch/schema.json",
+  "title": "llm-burnwatch JSONL log record",
+  "description": "One line of an llm-burnwatch log file is exactly one JSON object matching this schema. This is the source-of-truth contract for any client (Python or otherwise, e.g. Node.js/Go agents) that wants to write logs compatible with `llm-burnwatch report`/`detect`.",
   "type": "object",
   "required": [
     "schema_version",
