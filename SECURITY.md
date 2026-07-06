@@ -58,8 +58,9 @@ to the no-network-calls guarantee above (see "Network boundaries" in
 exact subcommand with a URL.
 
 What it does: fetches `<source>` over `http(s)://` (a 10 second timeout, a
-10 MB response cap, and rejection of any other URL scheme such as `file://`),
-parses it strictly as JSON (rejecting `Infinity`/`NaN`/non-object payloads),
+10 MB response cap, rejection of any other URL scheme such as `file://`,
+and refusal to follow a redirect that downgrades an `https://` source to a
+plain `http://` response), parses it strictly as JSON (rejecting `Infinity`/`NaN`/non-object payloads),
 extracts only numeric cost-per-token fields, and writes the result to
 `~/.config/llm-burnwatch/pricing.json`. The fetched content is never executed —
 it is read as data (numbers keyed by model name), the same way `report`/

@@ -617,12 +617,14 @@ def _detect_follow_poll(
     tells the caller whether state actually changed and needs saving, even
     when this poll happened to produce zero alerts.
 
-    Known limitation: an alert whose `record_ref` points at a record from a
-    *previous* poll (e.g. `FrequencyDetector` reporting a window's first
-    record) is filtered out even if the detection itself only became true
-    because of newly arrived data -- accepted as a deliberate, documented
-    trade-off of re-running stateless, batch detectors over a sliding window
-    rather than each detector tracking its own incremental state.
+    This filter only works if a detector's `record_ref` points at the most
+    recent record that contributed to the alert. `FrequencyDetector` used to
+    violate this by reporting a spike window's *first* record -- if that
+    record already existed from an earlier poll, a spike confirmed only by
+    calls that arrived *this* poll was silently dropped by this same filter.
+    Fixed by having `FrequencyDetector` report a spike window's *last*
+    record instead (see `frequency_detector.py`); any detector added to the
+    registry in the future should follow the same convention.
     """
     new_records, offsets, corrupt_count = read_new_records(log_path, offsets)
     if corrupt_count:

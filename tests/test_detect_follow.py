@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -147,6 +148,61 @@ def test_detect_follow_poll_flags_a_new_violation_appended_after_first_poll(tmp_
     assert any(
         a.kind == "call_cost_exceeded" and a.record_ref == 1 for a in alerts
     )
+
+
+def test_detect_follow_poll_reports_frequency_spike_confirmed_by_new_records(tmp_path):
+    # Regression test: FrequencyDetector used to report a spike window's
+    # *first* record as `record_ref`. If that first record already existed
+    # from an earlier poll, this function's own new-vs-already-seen filter
+    # (record_ref >= new_start_index) silently dropped the alert -- even
+    # though the spike was only confirmed by records that arrived *this*
+    # poll. Fixed by having FrequencyDetector report the window's *last*
+    # record instead (see frequency_detector.py).
+    log_path = tmp_path / "calls.jsonl"
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    # 60 calls, all within the same 60s frequency window -- not yet a spike
+    # (FREQUENCY_ABS_CALLS_PER_WINDOW is 100, and there's no window history
+    # yet for a z-score comparison).
+    first_batch = [
+        {
+            "label": "chat",
+            "model": "gpt-4o",
+            "timestamp": (base + timedelta(seconds=i * 0.3)).isoformat(),
+        }
+        for i in range(60)
+    ]
+    _write_lines(log_path, first_batch)
+
+    args = _detect_args(log_path, frequency_detector="on")
+    window: deque = deque(maxlen=5000)
+    first_alerts, offsets, _ = _detect_follow_poll(log_path, {}, window, args)
+    assert not any(a.kind == "frequency_spike" for a in first_alerts)
+
+    # 45 more calls in the *same* window, appended in a later poll, push the
+    # window's total to 105 -- past the absolute fail-safe.
+    second_batch = [
+        {
+            "label": "chat",
+            "model": "gpt-4o",
+            "timestamp": (base + timedelta(seconds=(60 + i) * 0.3)).isoformat(),
+        }
+        for i in range(45)
+    ]
+    _append_lines(log_path, second_batch)
+    second_alerts, offsets, had_new = _detect_follow_poll(log_path, offsets, window, args)
+
+    assert had_new is True
+    group_spikes = [
+        a
+        for a in second_alerts
+        if a.kind == "frequency_spike" and a.group_key == ("chat", "gpt-4o")
+    ]
+    assert len(group_spikes) == 1
+    assert group_spikes[0].evidence["window_calls"] == 105
+    # record_ref must point at a newly-arrived record (index >= 60) for the
+    # alert to have survived this function's own new-vs-already-seen filter.
+    assert group_spikes[0].record_ref == 104
 
 
 def test_detect_follow_poll_evicts_oldest_records_past_window_size(tmp_path):

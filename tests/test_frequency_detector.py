@@ -59,7 +59,10 @@ def test_frequency_detector_flags_spike_window_relative_to_group_history():
     assert alert.detector == "frequency"
     assert alert.evidence["window_calls"] == 20
     assert alert.evidence["expected_calls"] == 2
-    assert alert.record_ref == len(normal)
+    # The window's *last* record, not its first -- see the comment on
+    # `record_ref=idxs[-1]` in frequency_detector.py for why (`detect
+    # --follow`'s new-vs-already-seen filter depends on it).
+    assert alert.record_ref == len(records) - 1
 
 
 def test_frequency_detector_does_not_flag_a_quiet_window():

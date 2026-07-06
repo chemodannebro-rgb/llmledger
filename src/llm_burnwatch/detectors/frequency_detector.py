@@ -175,7 +175,16 @@ class FrequencyDetector:
                     severity="warning",
                     kind="frequency_spike",
                     group_key=group_key,
-                    record_ref=idxs[0],
+                    # The window's *last* record, not its first: `detect
+                    # --follow` (see `cli._detect_follow_poll`) decides
+                    # whether an alert is "new this poll" by comparing
+                    # `record_ref` against the index newly arrived records
+                    # start at. Pointing at the window's first call would
+                    # make that comparison see an old, already-surfaced
+                    # record even when the spike itself was only confirmed
+                    # by calls that arrived just now -- silently dropping a
+                    # genuinely new detection.
+                    record_ref=idxs[-1],
                     evidence={
                         "window_start": _window_start_iso(window_index),
                         "window_calls": n_calls,

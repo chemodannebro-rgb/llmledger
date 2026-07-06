@@ -44,6 +44,19 @@ def _fetch_url(url: str) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "llm-burnwatch-pricing-import"})
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310
+            # `urlopen` follows redirects transparently, including an
+            # https:// source redirecting to a plain http:// response --
+            # silently downgrading a request the caller explicitly asked to
+            # be encrypted. Refuse that specific downgrade (an http://
+            # source redirecting elsewhere was never protected to begin
+            # with, so there's nothing to downgrade there).
+            final_url = response.geturl()
+            if url.startswith("https://") and not final_url.startswith("https://"):
+                raise PricingImportError(
+                    f"refusing to follow a redirect from {url!r} to "
+                    f"{final_url!r}: an https:// source must not be "
+                    "downgraded to a non-https:// response"
+                )
             chunks = []
             total = 0
             while True:

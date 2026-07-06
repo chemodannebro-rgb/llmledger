@@ -260,6 +260,36 @@ All notable changes to this project are documented in this file.
   `pricing import` already do. No code changed --
   `test_core_commands_make_no_network_attempts` and the no-network
   guarantee it checks are untouched.
+- **`FrequencyDetector` spikes could be silently dropped by `detect
+  --follow`.** `_detect_follow_poll` decides whether an alert is "new this
+  poll" by checking `record_ref >= new_start_index`, which only works if
+  `record_ref` points at the most recent record that contributed to the
+  alert -- but `FrequencyDetector` reported a spike window's *first* record
+  instead. If that record already existed from an earlier poll, a spike
+  confirmed only by calls arriving *this* poll was filtered out as
+  "already surfaced," even though the detection itself was brand new (see
+  `test_detect_follow_poll_reports_frequency_spike_confirmed_by_new_records`
+  for the exact scenario). Fixed by having `FrequencyDetector` report a
+  spike window's *last* record instead -- purely an internal `record_ref`
+  choice, `evidence`/`message`/severity/exit-code behavior are unchanged.
+  Found and reported in review before this tag was ever pushed/published.
+- **`pricing import <url>` didn't notice an `https://` source silently
+  redirecting to a plain `http://` response.** `urlopen` follows redirects
+  transparently; a compromised or misconfigured server could downgrade an
+  encrypted request to plaintext partway through without the caller ever
+  knowing. `fetch_source`/`_fetch_url` now check the final URL after
+  redirects (`response.geturl()`) and refuse to proceed if an `https://`
+  source ended up at a non-`https://` response (an `http://` source
+  redirecting elsewhere was never protected to begin with, so it's
+  unaffected). Documented in `SECURITY.md`'s `pricing import <url>`
+  network trust boundary section. Found and reported in review before this
+  tag was ever pushed/published.
+- `pyproject.toml`'s `authors` field named the package itself
+  (`"llm-burnwatch"`) rather than a person -- an anonymous author is a
+  weaker trust signal on PyPI than a real name or a stable pseudonym.
+  Changed to the GitHub account that already publicly owns this repository
+  (`chemodannebro-rgb`), which was already visible in the `Homepage`/
+  `Repository`/`Issues` URLs just below it -- no new information disclosed.
 
 ## [0.7.0] - 2026-07-05
 

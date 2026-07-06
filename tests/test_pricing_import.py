@@ -58,8 +58,9 @@ def test_fetch_source_rejects_file_scheme(tmp_path):
 
 
 class _FakeResponse:
-    def __init__(self, payload: bytes):
+    def __init__(self, payload: bytes, url: str = "https://example.com/pricing.json"):
         self._chunks = [payload]
+        self._url = url
 
     def __enter__(self):
         return self
@@ -76,6 +77,9 @@ class _FakeResponse:
         else:
             self._chunks.pop(0)
         return chunk
+
+    def geturl(self):
+        return self._url
 
 
 def test_fetch_url_returns_decoded_body(monkeypatch):
@@ -121,6 +125,32 @@ def test_fetch_url_wraps_http_error(monkeypatch):
 
     with pytest.raises(PricingImportError, match="HTTP error fetching"):
         fetch_source("https://example.com/pricing.json")
+
+
+def test_fetch_url_rejects_https_to_http_redirect_downgrade(monkeypatch):
+    # `urlopen` follows redirects transparently -- an https:// source that
+    # redirects to a plain http:// response would otherwise be fetched
+    # (and trusted) without the caller ever knowing encryption was dropped
+    # partway through.
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(b"{}", url="http://example.com/pricing.json")
+
+    monkeypatch.setattr(pricing_import.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(PricingImportError, match="downgraded to a non-https"):
+        fetch_source("https://example.com/pricing.json")
+
+
+def test_fetch_url_allows_https_to_https_redirect(monkeypatch):
+    payload = json.dumps(LITELLM_SAMPLE).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(payload, url="https://cdn.example.com/pricing.json")
+
+    monkeypatch.setattr(pricing_import.urllib.request, "urlopen", fake_urlopen)
+
+    result = fetch_source("https://example.com/pricing.json")
+    assert json.loads(result) == LITELLM_SAMPLE
 
 
 def test_fetch_url_wraps_network_error(monkeypatch):
