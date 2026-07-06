@@ -61,3 +61,27 @@ EVAL_HOLDOUT_SEED = 0
 # holdout and say so explicitly instead of printing a metric computed on a
 # handful of points.
 EVAL_HOLDOUT_MIN_EXAMPLES = 20
+
+# Frequency detector (runaway-agent / burst-of-calls): modified z-score
+# threshold for a time window's call count vs. that same group's own
+# history of window counts, same robust-statistics family as
+# Z_SCORE_THRESHOLD. `FrequencyDetector` ships disabled by default (see its
+# `enabled_by_default`) precisely because, without a notion of expected
+# time-of-day/day-of-week call volume (seasonal baselines, a later v0.8
+# task), a routine "every Monday morning" burst looks statistically
+# identical to a runaway agent looping out of control.
+FREQUENCY_Z_THRESHOLD = 3.5
+
+# Absolute fail-safe for the frequency detector: flag a window once its call
+# count reaches this many, regardless of z-score. Covers two cases the
+# z-score can't: a first-ever burst with no prior windows to compare against
+# (no history means no median/MAD at all), and a burst so far past any
+# group's history that the modified z-score's zero-MAD "extreme deviation"
+# fallback would otherwise be the only thing that could catch it.
+FREQUENCY_ABS_CALLS_PER_WINDOW = 100
+
+# Width of each frequency-detector time window, in seconds. One minute is
+# coarse enough to keep window call-counts statistically meaningful for
+# typical agent call rates, fine enough that a burst doesn't get smeared
+# across an hour-wide bucket alongside unrelated normal traffic.
+FREQUENCY_WINDOW_SECONDS = 60

@@ -4,8 +4,15 @@ import json
 
 import pytest
 
+from datetime import datetime, timezone
+
 from llm_burnwatch.anomaly.constants import SCALE_WARNING_THRESHOLD
-from llm_burnwatch.logreader import check_scale, filter_by_period, iter_log_records
+from llm_burnwatch.logreader import (
+    check_scale,
+    filter_by_period,
+    iter_log_records,
+    parse_timestamp,
+)
 
 
 def _write_lines(path, records):
@@ -162,3 +169,19 @@ def test_filter_by_period_warns_once_for_whole_skip(capsys):
 
     assert captured.err.count("fell outside --since/--until") == 1
     assert "2 record(s)" in captured.err
+
+
+def test_parse_timestamp_returns_full_precision_datetime():
+    result = parse_timestamp("2026-01-01T12:34:56+00:00")
+    assert result == datetime(2026, 1, 1, 12, 34, 56, tzinfo=timezone.utc)
+
+
+def test_parse_timestamp_normalizes_trailing_z_suffix():
+    result = parse_timestamp("2026-01-01T12:34:56Z")
+    assert result == datetime(2026, 1, 1, 12, 34, 56, tzinfo=timezone.utc)
+
+
+def test_parse_timestamp_returns_none_for_unparseable_or_missing_value():
+    assert parse_timestamp("not-a-timestamp") is None
+    assert parse_timestamp(None) is None
+    assert parse_timestamp(12345) is None

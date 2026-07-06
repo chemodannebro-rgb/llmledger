@@ -21,6 +21,27 @@ All notable changes to this project are documented in this file.
 - `detect`'s internals now route through `detectors.engine.run_detectors()`
   instead of calling `anomaly.baseline.analyze()` directly. Its `--json` and
   text output are unchanged — this is purely an internal refactor.
+- `detectors.frequency_detector.FrequencyDetector` (v0.8.1): a new detector
+  that flags time windows (`FREQUENCY_WINDOW_SECONDS`, 60s) whose call count
+  is anomalously high relative to that same `(label, model)` group's own
+  history of window counts (modified z-score over `_median_mad()`, same
+  robust-statistics family as the baseline detector), plus an independent
+  log-wide check that catches a fan-out burst spread across many different
+  labels/models. An absolute fail-safe (`FREQUENCY_ABS_CALLS_PER_WINDOW`,
+  100 calls/window) flags a burst even with no prior window history to
+  compare against. Only increases are flagged — a quiet window is never a
+  "runaway agent." Ships **disabled by default**
+  (`enabled_by_default = False`) and is not yet wired into `detect`'s CLI
+  registry: without a notion of expected time-of-day/day-of-week call
+  volume (seasonal baselines, planned for v0.8.4), a routine "Monday
+  morning" burst looks statistically identical to a runaway agent. It is
+  registered in `detectors.engine.DEFAULT_REGISTRY` for future callers, but
+  this has no effect on `detect`'s current output.
+- `logreader.parse_timestamp()`: parses a schema `timestamp` string to a
+  full-precision `datetime` (same trailing-`Z` normalization as the existing
+  `parse_date()`), added alongside `parse_date()` without changing it or its
+  only caller (`filter_by_period`). Needed by the frequency detector to
+  bucket records into fixed-size time windows.
 
 ## [0.7.0] - 2026-07-05
 

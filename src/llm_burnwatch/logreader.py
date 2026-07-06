@@ -110,6 +110,26 @@ def parse_date(timestamp) -> str | None:
         return None
 
 
+def parse_timestamp(timestamp) -> datetime | None:
+    """Return the parsed `datetime` for a schema `timestamp` string (full
+    precision, not just the calendar date `parse_date` gives), or `None` if
+    it's missing/unparseable.
+
+    Same trailing-`Z` normalization as `parse_date`; kept as a separate
+    function rather than changing `parse_date`'s return type, since
+    `parse_date`'s only caller (`filter_by_period`) only ever needed the
+    date. Detectors that bucket records into time windows (e.g. the
+    frequency detector) need this finer precision instead.
+    """
+    if not isinstance(timestamp, str):
+        return None
+    text = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def filter_by_period(
     records: list[dict], since: str | None, until: str | None
 ) -> list[dict]:

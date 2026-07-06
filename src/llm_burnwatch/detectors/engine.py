@@ -17,9 +17,15 @@ from __future__ import annotations
 from typing import Mapping, Sequence
 
 from .baseline_detector import BaselineDetector
+from .frequency_detector import FrequencyDetector
 from .protocol import Alert, Detector
 
-DEFAULT_REGISTRY: list[Detector] = [BaselineDetector()]
+# `FrequencyDetector.enabled_by_default` is `False`, so registering it here
+# doesn't change `run_detectors()`'s output for any existing caller -- it
+# only becomes reachable via an explicit `enabled_overrides={"frequency":
+# True}` (planned to be wired up automatically once seasonal baselines are
+# available for a given log).
+DEFAULT_REGISTRY: list[Detector] = [BaselineDetector(), FrequencyDetector()]
 
 # Sort key only -- not a claim that "info" alerts matter less, just a stable,
 # predictable order for output (most actionable first within the same call).
