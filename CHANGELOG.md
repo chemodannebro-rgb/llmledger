@@ -210,6 +210,29 @@ All notable changes to this project are documented in this file.
   all calls back-to-back into a single window, an artifact of the demo
   script rather than a realistic call rate).
 
+### Fixed
+- **`CusumDetector` was never reachable through `detect`'s CLI.** Every
+  bullet above from v0.8.2 onward candidly noted this ("registered in
+  `DEFAULT_REGISTRY`, but `detect`'s CLI still builds its own explicit
+  registry" / "out of scope for this change") -- documented as a known gap
+  rather than a silent omission, but a gap all the same: the milestone's
+  headline scenario (a prompt change that quietly makes every response
+  longer/pricier, with no single call crossing the baseline z-score
+  threshold on its own) was invisible through `detect`, even though a
+  direct `run_detectors()` call over the same records correctly caught it
+  (see `test_prompt_regression_scenario_is_flagged_by_cusum_detector`).
+  Found and reported in review before this tag was ever pushed/published.
+  Fixed the same way `FrequencyDetector`/`RulesDetector` were wired in:
+  `CusumDetector()` added to `_detect_registry()`, a new `--cusum-detector
+  {on,off}` flag (default `on`, matching `CusumDetector.enabled_by_default`
+  -- no `auto` state, since unlike frequency there's no seasonal
+  false-positive risk to gate on), and three new, purely additive `--json`
+  keys: `cusum_detector_enabled`, `level_shift_count`, `level_shifts`
+  (same shape as `frequency_spikes`). The text output gains a new "N level
+  shift(s) found" section, and `detect`'s exit code now also returns `1`
+  when a level shift is found. Applies to both one-shot `detect` and
+  `detect --follow`, which share the same registry-building code.
+
 ## [0.7.0] - 2026-07-05
 
 > **Known gap (tech debt):** `.github/workflows/release.yml` publishes to

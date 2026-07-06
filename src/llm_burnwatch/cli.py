@@ -59,6 +59,7 @@ from .anomaly.seasonal import has_seasonal_coverage, seasonal_coverage_message
 from .dashboard import render_dashboard
 from .demo_data import DEFAULT_SEED, write_demo_log
 from .detectors.baseline_detector import BaselineDetector
+from .detectors.cusum_detector import CusumDetector
 from .detectors.engine import run_detectors
 from .detectors.frequency_detector import FrequencyDetector
 from .detectors.protocol import ALERT_SCHEMA_VERSION
@@ -401,6 +402,7 @@ def _detect_registry(args: argparse.Namespace) -> list:
     return [
         BaselineDetector(threshold=args.threshold),
         FrequencyDetector(),
+        CusumDetector(),
         RulesDetector(
             allowed_models=args.allowed_models,
             max_call_cost_usd=args.max_call_cost,
@@ -419,6 +421,19 @@ def _frequency_enabled_for(records: list[dict], args: argparse.Namespace) -> tup
     else:
         frequency_enabled = args.frequency_detector == "on"
     return frequency_enabled, seasonal_available
+
+
+def _cusum_enabled_for(args: argparse.Namespace) -> bool:
+    """Returns whether `CusumDetector` should run, from `--cusum-detector`.
+
+    Unlike `_frequency_enabled_for`, there's no log-dependent "auto" case:
+    `CusumDetector.enabled_by_default` is already `True` -- a sustained
+    cost/token level shift isn't subject to the day-of-week false-positive
+    risk that justifies the frequency detector's seasonal gating (see
+    `CusumDetector`'s docstring) -- so `--cusum-detector` is a plain on/off
+    switch.
+    """
+    return args.cusum_detector == "on"
 
 
 def cmd_detect(args: argparse.Namespace) -> int:
@@ -466,11 +481,12 @@ def cmd_detect(args: argparse.Namespace) -> int:
     # overrides that decision explicitly in either direction, the same
     # override pattern already used for `RulesDetector`'s CLI flags.
     frequency_enabled, seasonal_available = _frequency_enabled_for(records, args)
+    cusum_enabled = _cusum_enabled_for(args)
 
     alerts = run_detectors(
         records,
         registry=_detect_registry(args),
-        enabled_overrides={"frequency": frequency_enabled},
+        enabled_overrides={"frequency": frequency_enabled, "cusum": cusum_enabled},
     )
 
     anomalous = [(a.record_ref, a) for a in alerts if a.kind == "zscore_outlier"]
@@ -482,6 +498,9 @@ def cmd_detect(args: argparse.Namespace) -> int:
     # Frequency spikes -- likewise additive; only present at all when
     # `frequency_enabled` is True for this run.
     frequency_spikes = [a for a in alerts if a.detector == "frequency"]
+    # Level shifts from CusumDetector -- likewise additive; only present at
+    # all when `cusum_enabled` is True for this run (on by default).
+    level_shifts = [a for a in alerts if a.detector == "cusum"]
 
     ml_info = _run_ml_cross_check(records, args.model_dir)
 
@@ -531,6 +550,17 @@ def cmd_detect(args: argparse.Namespace) -> int:
                 }
                 for a in frequency_spikes
             ],
+            "cusum_detector_enabled": cusum_enabled,
+            "level_shift_count": len(level_shifts),
+            "level_shifts": [
+                {
+                    "index": a.record_ref,
+                    "group_key": a.group_key,
+                    "message": a.message,
+                    "evidence": a.evidence,
+                }
+                for a in level_shifts
+            ],
             "ml": ml_info,
         }
         print(json.dumps(payload, indent=2))
@@ -554,13 +584,17 @@ def cmd_detect(args: argparse.Namespace) -> int:
             print(f"{len(frequency_spikes)} frequency spike(s) found:")
             for a in frequency_spikes:
                 print(f"- [{a.record_ref}] {a.group_key}: {a.message}")
+        if cusum_enabled and level_shifts:
+            print(f"{len(level_shifts)} level shift(s) found:")
+            for a in level_shifts:
+                print(f"- [{a.record_ref}] {a.group_key}: {a.message}")
         if ml_info is not None and ml_info.get("available"):
             print(
                 f"ML cross-check (model v{ml_info['model_version']}): "
                 f"{ml_info['anomaly_count']} call(s) flagged"
             )
 
-    return 1 if (anomalous or rule_violations or frequency_spikes) else 0
+    return 1 if (anomalous or rule_violations or frequency_spikes or level_shifts) else 0
 
 
 def _detect_follow_poll(
@@ -602,10 +636,11 @@ def _detect_follow_poll(
     new_start_index = len(records) - len(new_records)
 
     frequency_enabled, _ = _frequency_enabled_for(records, args)
+    cusum_enabled = _cusum_enabled_for(args)
     alerts = run_detectors(
         records,
         registry=_detect_registry(args),
-        enabled_overrides={"frequency": frequency_enabled},
+        enabled_overrides={"frequency": frequency_enabled, "cusum": cusum_enabled},
     )
     new_alerts = [
         a for a in alerts if a.record_ref is not None and a.record_ref >= new_start_index
@@ -951,6 +986,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Runaway-agent frequency detector: 'auto' (default) enables it only once "
             "the log has enough calendar span for a seasonal (weekday/hour) baseline; "
             "'on'/'off' override that decision explicitly"
+        ),
+    )
+    detect_p.add_argument(
+        "--cusum-detector",
+        choices=["on", "off"],
+        default="on",
+        help=(
+            "Sustained level-shift (CUSUM) detector over output_tokens/cost_micros: "
+            "'on' (default) runs it, 'off' disables it. Unlike --frequency-detector, "
+            "there's no 'auto' -- a sustained cost/token shift isn't subject to the "
+            "day-of-week false-positive risk that justifies frequency's seasonal gating"
         ),
     )
     detect_p.add_argument(

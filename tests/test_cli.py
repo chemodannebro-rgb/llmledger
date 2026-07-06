@@ -9,13 +9,21 @@ from types import SimpleNamespace
 import pytest
 
 from llm_burnwatch.cli import DISCLAIMER, _filter_report_records, main
-from llm_burnwatch.demo_data import write_demo_log
+from llm_burnwatch.demo_data import prompt_regression, write_demo_log
 from llm_burnwatch.tracker import CostTracker
 
 
 def _demo_log(tmp_path, **kwargs):
     log_path = tmp_path / "demo.jsonl"
     write_demo_log(log_path, **kwargs)
+    return log_path
+
+
+def _scenario_log(tmp_path, results, name="calls.jsonl"):
+    log_path = tmp_path / name
+    with log_path.open("w", encoding="utf-8") as fh:
+        for record, _label in results:
+            fh.write(json.dumps(record) + "\n")
     return log_path
 
 
@@ -430,7 +438,56 @@ def test_detect_command_json_output_is_valid_json_with_expected_keys(tmp_path, c
     assert payload["call_count"] == 210
     assert payload["anomaly_count"] >= 10
     assert "anomalies" in payload
+    assert payload["cusum_detector_enabled"] is True
+    assert "level_shift_count" in payload
+    assert "level_shifts" in payload
     assert payload["ml"] is None  # no trained model yet
+
+
+def test_detect_command_flags_cusum_level_shift(tmp_path, capsys):
+    # Regression test: CusumDetector was fully implemented (v0.8.2,
+    # enabled_by_default=True) but `detect`'s CLI built its own explicit
+    # registry that never included it, so the milestone's flagship scenario
+    # -- a prompt change that quietly makes every response pricier, with no
+    # single call crossing the baseline z-score threshold on its own -- was
+    # invisible through the CLI even though a direct `run_detectors()` call
+    # on the same records correctly caught it. `--cusum-detector` defaults
+    # to "on", matching `CusumDetector.enabled_by_default`.
+    log_path = _scenario_log(tmp_path, prompt_regression())
+
+    exit_code = main(
+        ["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models"), "--json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["cusum_detector_enabled"] is True
+    assert payload["level_shift_count"] > 0
+    assert any(
+        ls["evidence"]["feature"] == "output_tokens" for ls in payload["level_shifts"]
+    ), "expected the abrupt output_tokens level shift to be reported via --json"
+
+
+def test_detect_command_cusum_detector_off_flag_disables_it(tmp_path, capsys):
+    log_path = _scenario_log(tmp_path, prompt_regression())
+
+    main(
+        [
+            "detect",
+            "--log-file",
+            str(log_path),
+            "--model-dir",
+            str(tmp_path / "models"),
+            "--json",
+            "--cusum-detector",
+            "off",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["cusum_detector_enabled"] is False
+    assert payload["level_shift_count"] == 0
+    assert payload["level_shifts"] == []
 
 
 def test_detect_json_anomaly_features_include_human_readable_reason(tmp_path, capsys):
