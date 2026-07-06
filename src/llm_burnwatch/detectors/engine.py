@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Mapping, Sequence
 
 from .baseline_detector import BaselineDetector
+from .cusum_detector import CusumDetector
 from .frequency_detector import FrequencyDetector
 from .protocol import Alert, Detector
 
@@ -24,8 +25,16 @@ from .protocol import Alert, Detector
 # doesn't change `run_detectors()`'s output for any existing caller -- it
 # only becomes reachable via an explicit `enabled_overrides={"frequency":
 # True}` (planned to be wired up automatically once seasonal baselines are
-# available for a given log).
-DEFAULT_REGISTRY: list[Detector] = [BaselineDetector(), FrequencyDetector()]
+# available for a given log). `CusumDetector.enabled_by_default` is `True`,
+# but `detect`'s CLI still builds its own explicit registry rather than
+# using `DEFAULT_REGISTRY` (see `cli.py`'s `cmd_detect`), so adding it here
+# doesn't change `detect`'s current output either -- this registry is for
+# future callers (e.g. `detect --follow`) that use it directly.
+DEFAULT_REGISTRY: list[Detector] = [
+    BaselineDetector(),
+    FrequencyDetector(),
+    CusumDetector(),
+]
 
 # Sort key only -- not a claim that "info" alerts matter less, just a stable,
 # predictable order for output (most actionable first within the same call).

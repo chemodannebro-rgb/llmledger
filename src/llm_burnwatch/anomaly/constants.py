@@ -85,3 +85,26 @@ FREQUENCY_ABS_CALLS_PER_WINDOW = 100
 # typical agent call rates, fine enough that a burst doesn't get smeared
 # across an hour-wide bucket alongside unrelated normal traffic.
 FREQUENCY_WINDOW_SECONDS = 60
+
+# CUSUM (level-shift) detector: how many reference MADs the one-sided
+# cumulative sum must exceed before a sustained rise counts as a level
+# shift. Unlike Z_SCORE_THRESHOLD/FREQUENCY_Z_THRESHOLD (textbook cutoffs
+# from the robust-statistics literature), this was chosen empirically by
+# simulation: on stable synthetic data it keeps the false-positive rate
+# under 1% across a range of group sizes (20-200 records), while still
+# flagging a sustained 35% rise in a feature within a bounded number of
+# records after it starts -- see `test_cusum_detector.py`. A raw MAD is a
+# smaller unit than a normal-distribution sigma (MAD ~= 0.6745 * sigma),
+# so this multiplier is intentionally larger than the classic h=4-5 sigma
+# guidance for tabular CUSUM (Page 1954; Montgomery, "Introduction to
+# Statistical Quality Control").
+CUSUM_H_MULTIPLIER = 12.0
+
+# CUSUM slack ("allowance"): subtracted from each deviation before
+# accumulating, so the cumulative sum only grows on a *persistent* rise
+# and drifts back to zero under normal (mean-reverting) fluctuation --
+# without it, a one-sided CUSUM can wander upward indefinitely on purely
+# stable data (confirmed by simulation). 0.5 MAD follows the standard
+# recommendation of setting the slack to about half the smallest shift
+# you want to reliably detect (Page 1954; Montgomery).
+CUSUM_SLACK_MULTIPLIER = 0.5

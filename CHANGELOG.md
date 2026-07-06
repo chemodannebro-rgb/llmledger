@@ -42,6 +42,23 @@ All notable changes to this project are documented in this file.
   `parse_date()`), added alongside `parse_date()` without changing it or its
   only caller (`filter_by_period`). Needed by the frequency detector to
   bucket records into fixed-size time windows.
+- `detectors.cusum_detector.CusumDetector` (v0.8.2): a new detector that
+  flags a *sustained* rise in a group's `output_tokens`/`cost_micros` using
+  a one-sided tabular CUSUM against that group's own reference median/MAD
+  — catching a level shift (e.g. a prompt change that quietly makes every
+  response longer/pricier) even when no single call's own z-score crosses
+  the baseline detector's threshold on its own. Two new constants,
+  `CUSUM_H_MULTIPLIER` (12.0) and `CUSUM_SLACK_MULTIPLIER` (0.5), were
+  chosen by simulation to keep the false-positive rate on stable synthetic
+  data under 1% while still detecting a sustained 35% rise within a
+  bounded number of records (see `test_cusum_detector.py`). Only rises are
+  flagged, never drops. Ships **enabled by default**
+  (`enabled_by_default = True`, unlike the frequency detector — a
+  sustained cost/token shift isn't subject to the same day-of-week
+  false-positive risk) and is registered in
+  `detectors.engine.DEFAULT_REGISTRY`, but `detect`'s CLI still builds its
+  own explicit registry, so this has no effect on `detect`'s current
+  output.
 
 ## [0.7.0] - 2026-07-05
 
