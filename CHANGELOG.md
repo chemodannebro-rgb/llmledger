@@ -67,12 +67,13 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 - `BACKLOG.md`/`BACKLOG_REVIEW.md` (internal planning drafts, deleted
-  outright — no longer needed once `TEAM.md` became the canonical team
-  reference) and the example `models/v1/` registry (`model.skops` +
-  `metadata.json`, untracked via `git rm --cached` but left on disk
-  locally) are no longer tracked in git. The model registry is trivially
-  regenerated via `demo-data` + `train`, and a committed model binary was
-  already flagged in `SECURITY.md` as a weak trust boundary for a public
+  outright — superseded by an internal, gitignored role/review scaffold
+  not published in this repo) and the example `models/v1/` registry
+  (`model.skops` + `metadata.json`, untracked via `git rm --cached` but
+  left on disk locally) are no longer tracked in git. The model registry
+  is trivially regenerated via `demo-data` + `train`, and a committed
+  model binary was already flagged in `SECURITY.md` as a weak trust
+  boundary for a public
   repository.
 
 ## [0.6.0] - 2026-07-05
