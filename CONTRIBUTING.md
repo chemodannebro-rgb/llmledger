@@ -1,7 +1,7 @@
 # Contributing
 
-`llm-burnwatch` is a portfolio/demo engineering project (see README's opening
-note — no support, no SLA), but it takes contributions seriously enough to
+`llm-burnwatch` is an early-stage project (see README's opening note — API
+may change before v1.0), but it takes contributions seriously enough to
 write this down instead of leaving it as tribal knowledge.
 
 ## Setup

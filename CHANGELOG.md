@@ -232,6 +232,34 @@ All notable changes to this project are documented in this file.
   shift(s) found" section, and `detect`'s exit code now also returns `1`
   when a level shift is found. Applies to both one-shot `detect` and
   `detect --follow`, which share the same registry-building code.
+- **README/SECURITY.md/CONTRIBUTING.md still contradicted the planned v0.9
+  milestone.** The "Changed" entry above for this same version says README's
+  opening note now *leads with* "Early stage — API may change before v1.0"
+  -- but it left the older "Portfolio/demo... not a commercial product, no
+  support, no SLA" sentence in place right after it, and "System boundaries"
+  still claimed `llm-burnwatch` "never sends a notification and has no
+  optional dependency that would let it (no Slack SDK, etc.)" -- an absolute,
+  permanent-sounding claim that the next milestone (v0.9, an opt-in
+  `[alerts]` extra for webhook/Slack sinks) would have to directly break.
+  Found and reported in review before this tag was ever pushed/published.
+  Resolved in favor of keeping the door open for v0.9 (the alternative --
+  permanently ruling out any notification sink and descoping v0.9 down to
+  budgets/guard/OTel/adapters only -- was also on the table, but a
+  zero-dependency core that already ships optional extras for *other*
+  things (scikit-learn/skops behind `[anomaly]`, an explicit opt-in fetch
+  for `pricing import <url>`) doesn't need to foreclose a future optional
+  extra for notification sinks too): dropped the portfolio/commercial
+  sentence from README's opening note and from `SECURITY.md`'s/
+  `CONTRIBUTING.md`'s opening lines (all three now just point to "Early
+  stage — API may change before v1.0"), and reworded README's "When NOT to
+  use", "entire integration contract", and "System boundaries" sections
+  from absolute "by design"/"never...that would let it" claims to
+  present-tense ones ("doesn't ship a notification sink yet") that describe
+  today's core accurately without ruling out a future notification sink
+  living behind its own optional extra, the same way `[anomaly]` and
+  `pricing import` already do. No code changed --
+  `test_core_commands_make_no_network_attempts` and the no-network
+  guarantee it checks are untouched.
 
 ## [0.7.0] - 2026-07-05
 

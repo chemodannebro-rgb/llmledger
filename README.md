@@ -2,9 +2,7 @@
 
 [![CI](https://github.com/chemodannebro-rgb/llm-burnwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/chemodannebro-rgb/llm-burnwatch/actions/workflows/ci.yml)
 
-> Early stage — API may change before v1.0. Portfolio/demo engineering
-> project: not a commercial product, no support, no SLA, use at your own
-> risk.
+> Early stage — API may change before v1.0.
 
 Local, zero-dependency cost tracking and statistical anomaly detection for
 LLM/agent calls. Logs go to a plain JSONL file on your own disk; nothing
@@ -67,10 +65,11 @@ read yourself.
   [LiteLLM](https://www.litellm.ai/)'s proxy instead (llm-burnwatch's own
   `pricing import` command happens to reuse LiteLLM's *pricing data
   format*, but that's the only connection between the two projects).
-- **You need real-time alerting** (Slack/email/webhook on a cost spike or
-  anomaly) — llm-burnwatch has no notification integration by design (see
-  [System boundaries](#system-boundaries) below); `detect`'s exit code and
-  `--json` output are meant to be wired into your own cron/CI/monitoring.
+- **You need real-time alerting right now** (Slack/email/webhook on a cost
+  spike or anomaly) — llm-burnwatch doesn't ship a notification sink yet
+  (see [System boundaries](#system-boundaries) below); until it does,
+  `detect`'s exit code and `--json` output are meant to be wired into your
+  own cron/CI/monitoring.
 
 ## SDK adapters
 
@@ -164,9 +163,9 @@ before v1.0.
 with a missing or unparseable `timestamp` are excluded whenever either bound
 is given.
 
-Exit codes are the entire integration contract — `llm-burnwatch` never sends
-notifications itself (no Slack/email/webhook integration, and no such
-dependency in `pyproject.toml`). Wire the exit code and/or `--json` output
+Exit codes are the current integration contract — `llm-burnwatch` doesn't
+ship a notification sink itself yet (no Slack/email/webhook integration in
+the zero-dependency core today). Wire the exit code and/or `--json` output
 of `detect` into cron, CI, or your own alerting.
 
 Try it end to end:
@@ -280,21 +279,26 @@ recommending one of the above.
 
 ## System boundaries
 
-`llm-burnwatch` reads and writes local files and prints to stdout/stderr; it
-never sends a notification and has no optional dependency that would let it
-(no Slack SDK, etc.). `report`/`demo-data`/`schema`/`validate`/`dashboard`/
-`detect`/`train` never make a network call. The one exception is
-`llm-burnwatch pricing import <url>`, which fetches a pricing file over
-`http(s)://` — but only when you explicitly run that command with a URL
-(a local file path never touches the network), and it never runs
-implicitly. Any alerting on top of `detect`'s exit code or `--json` output
-is your own cron job / CI step / monitoring system to build.
+`llm-burnwatch`'s zero-dependency core reads and writes local files and
+prints to stdout/stderr; it doesn't send notifications itself today, and
+none of `report`/`demo-data`/`schema`/`validate`/`dashboard`/`detect`/`train`
+make a network call. The one exception is `llm-burnwatch pricing import
+<url>`, which fetches a pricing file over `http(s)://` — but only when you
+explicitly run that command with a URL (a local file path never touches the
+network), and it never runs implicitly. Any alerting on top of `detect`'s
+exit code or `--json` output is your own cron job / CI step / monitoring
+system to build for now.
 
-This no-network-calls guarantee for the rest of the CLI is checked by
-`test_core_commands_make_no_network_attempts` (`tests/test_cli.py`), which
-patches `socket.socket` to raise if any of those commands tries to open
-one; see `ARCHITECTURE.md`'s "Network boundaries" section for the full
-policy on adding future exceptions.
+This no-network-calls guarantee is scoped to the core commands listed above
+and is checked by `test_core_commands_make_no_network_attempts`
+(`tests/test_cli.py`), which patches `socket.socket` to raise if any of them
+tries to open one. It's a guarantee about the core, not a permanent ban on
+network access anywhere in the project: like the optional `[anomaly]` extra
+(scikit-learn/skops, gated behind its own extra) and `pricing import`'s
+existing opt-in fetch, any future notification sink (e.g. a webhook/Slack
+integration) would live behind its own optional extra rather than in the
+zero-dependency core — see `ARCHITECTURE.md`'s "Network boundaries" section
+for the full policy on adding such exceptions.
 
 See [`SECURITY.md`](SECURITY.md) for the model registry's trust boundary,
 the `pricing import` network trust boundary, and how to report a

@@ -1,7 +1,7 @@
 # Security policy
 
-`llm-burnwatch` is a portfolio / demo engineering project, not a commercial
-product — there is no SLA, but reports are still welcome.
+`llm-burnwatch` is an early-stage project — there is no SLA, but reports are
+still welcome.
 
 ## Reporting a vulnerability
 
