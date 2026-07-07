@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -101,6 +102,40 @@ def _get(obj: Any, name: str, default=None):
     return getattr(obj, name, default)
 
 
+class BudgetExceededError(Exception):
+    """Raised by `CostTracker.guard()` when a `log_call()` (or one of the
+    SDK-response adapters, which all call `log_call()` internally) pushes a
+    guarded trace over `max_usd_per_trace` or `max_calls_per_trace`.
+
+    This is real-time, in-process enforcement -- see `guard()`'s docstring
+    for exactly what it does and does not guarantee, most importantly that
+    it is **not** the same mechanism as `budget`/`BudgetDetector`
+    (`detectors/budget_detector.py`), which is a cross-process, month-long,
+    post-hoc analysis of the log file. `guard()` only ever sees calls made
+    through *this* `CostTracker` instance, in *this* process, inside the
+    `with` block that raised.
+
+    The call that pushed the trace over its limit has already been logged
+    (its record is already on disk) by the time this is raised: the real
+    API call already happened and already cost money, so silently dropping
+    its record would misrepresent actual spend in `report`/`detect`. This
+    exception is a signal to the caller to stop making *further* calls in
+    this trace, not a way to undo the one that just happened.
+    """
+
+
+class _GuardState:
+    """Per-trace_id in-memory accounting for an active `guard()` block."""
+
+    __slots__ = ("max_usd_per_trace", "max_calls_per_trace", "spent_micros", "call_count")
+
+    def __init__(self, max_usd_per_trace: float | None, max_calls_per_trace: int | None) -> None:
+        self.max_usd_per_trace = max_usd_per_trace
+        self.max_calls_per_trace = max_calls_per_trace
+        self.spent_micros = 0
+        self.call_count = 0
+
+
 class CostTracker:
     """Logs one JSONL record per `log_call()` and can summarize the
     resulting log via `report()`.
@@ -146,6 +181,7 @@ class CostTracker:
             self.pricing = pricing if pricing is not None else load_default_pricing()
         self._read_path = Path(log_file)
         self._write_path = self._resolve_write_path(self._read_path)
+        self._guards: dict[str, _GuardState] = {}
 
         try:
             self._write_path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,6 +279,79 @@ class CostTracker:
         )
         return round(micros)
 
+    @contextmanager
+    def guard(
+        self,
+        *,
+        trace_id: str | None = None,
+        max_usd_per_trace: float | None = None,
+        max_calls_per_trace: int | None = None,
+    ):
+        """Context manager enforcing an in-process spend/call-count limit on
+        every `log_call()` (and adapter) made with a matching `trace_id`
+        while the block is open. Raises `BudgetExceededError` from the
+        `log_call()`/adapter invocation that pushes the trace over the
+        limit -- typically used to break out of a runaway agent loop.
+
+        This is **enforcement, not detection** -- the opposite trade-off
+        from `budget`/`BudgetDetector` (`detectors/budget_detector.py`,
+        `llm-burnwatch budget set`): `guard()` is in-memory, per-process,
+        and scoped to a single trace/`with` block, so it stops a loop the
+        instant it goes over, but two processes (or two `CostTracker`
+        instances) sharing a `trace_id` are invisible to each other, and it
+        forgets everything the moment the `with` block exits -- it is not a
+        daily/monthly budget. Use `budget`/`BudgetDetector` to know your
+        month is trending over budget across every process that writes to
+        the log; use `guard()` to stop one in-process loop from spending
+        past a limit right now. They compose (nothing stops using both) but
+        neither substitutes for the other.
+
+        `trace_id`, if not given, defaults to a freshly generated UUID4 hex
+        string, yielded to the `with` block so the caller can pass it to
+        `log_call(..., trace_id=<that value>)`/the adapters -- only calls
+        logged with a matching `trace_id` count against this guard; calls
+        without a `trace_id`, or with a different one, are invisible to it.
+        At least one of `max_usd_per_trace`/`max_calls_per_trace` must be
+        given -- calling `guard()` with neither would silently enforce
+        nothing, which is far more likely a caller mistake than an
+        intentional no-op.
+        """
+        if max_usd_per_trace is None and max_calls_per_trace is None:
+            raise ValueError(
+                "guard() requires at least one of max_usd_per_trace or "
+                "max_calls_per_trace"
+            )
+        resolved_trace_id = trace_id if trace_id is not None else uuid.uuid4().hex
+        self._guards[resolved_trace_id] = _GuardState(max_usd_per_trace, max_calls_per_trace)
+        try:
+            yield resolved_trace_id
+        finally:
+            self._guards.pop(resolved_trace_id, None)
+
+    def _enforce_guard(self, trace_id: str | None, cost_micros: int) -> None:
+        if trace_id is None:
+            return
+        state = self._guards.get(trace_id)
+        if state is None:
+            return
+
+        state.spent_micros += cost_micros
+        state.call_count += 1
+
+        if (
+            state.max_usd_per_trace is not None
+            and state.spent_micros > round(state.max_usd_per_trace * 1_000_000)
+        ):
+            raise BudgetExceededError(
+                f"trace {trace_id!r} spent ${state.spent_micros / 1_000_000:.6f}, "
+                f"exceeding max_usd_per_trace=${state.max_usd_per_trace:.2f}"
+            )
+        if state.max_calls_per_trace is not None and state.call_count > state.max_calls_per_trace:
+            raise BudgetExceededError(
+                f"trace {trace_id!r} made {state.call_count} call(s), exceeding "
+                f"max_calls_per_trace={state.max_calls_per_trace}"
+            )
+
     def log_call(
         self,
         *,
@@ -264,6 +373,11 @@ class CostTracker:
         dollar amount that skips pricing lookup entirely (e.g. for
         image/audio/embedding calls not billed per-token). `pricing`, if
         given, overrides the pricing.json lookup for this call only.
+
+        Raises `BudgetExceededError` if `trace_id` matches an active
+        `guard()` block whose `max_usd_per_trace`/`max_calls_per_trace` this
+        call pushes over -- the record above is still written first (see
+        `BudgetExceededError`'s docstring for why).
         """
         if not isinstance(label, str) or not label:
             raise ValueError("label must be a non-empty string")
@@ -299,6 +413,7 @@ class CostTracker:
             record["extra"] = extra
 
         self._logger.info(json.dumps(record, separators=(",", ":")))
+        self._enforce_guard(trace_id, cost_micros)
         return record
 
     def log_openai_response(

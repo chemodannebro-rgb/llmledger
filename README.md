@@ -185,6 +185,36 @@ happening or throws partway through a request. Wire `detect`'s exit code
 into your own alerting the same way you would for any other anomaly, same
 as the rest of this section.
 
+### Enforcing a spend limit in-process (`CostTracker.guard()`)
+
+`budget`/`BudgetDetector` above is post-hoc, cross-process, month-long
+*detection*. `CostTracker.guard()` is the opposite trade-off: real-time,
+in-process, per-`with`-block *enforcement* — it stops a runaway loop the
+moment it goes over, but forgets everything the instant the block exits and
+is invisible across processes:
+
+```python
+tracker = CostTracker("calls.jsonl")
+
+with tracker.guard(max_usd_per_trace=1.0, max_calls_per_trace=20) as trace_id:
+    for step in agent_loop():
+        response = openai_client.chat.completions.create(...)
+        tracker.log_openai_response(response, label="agent-step", trace_id=trace_id)
+        # BudgetExceededError is raised from the log_*() call that pushes this
+        # trace over $1.00 or 20 calls, whichever comes first — the call that
+        # tripped it is still logged (it already happened and already cost
+        # money by the time log_call() runs); the exception is your signal to
+        # stop the loop, not a way to undo that last call.
+```
+
+Only calls logged with a `trace_id` matching the active `guard()` block
+count against it — pass the `trace_id` `guard()` yields you (or your own,
+via `guard(trace_id=...)`) to every `log_call()`/adapter call inside the
+block. Two `guard()` blocks with different `trace_id`s (even nested, even
+concurrent) track completely independent totals. `guard()` and
+`budget`/`BudgetDetector` solve different problems and compose freely —
+neither replaces the other.
+
 Exit codes are the integration contract for one-shot `detect`. `detect
 --follow` additionally supports pushing each newly triggered alert to a
 webhook, Slack, Telegram, or a local command (see

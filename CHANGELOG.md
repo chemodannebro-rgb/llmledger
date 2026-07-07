@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.3] - 2026-07-07
+
+### Added
+- `CostTracker.guard(trace_id=None, max_usd_per_trace=None,
+  max_calls_per_trace=None)`: a context manager giving in-process,
+  real-time enforcement of a spend/call-count cap on a single trace,
+  raising a new `BudgetExceededError` from whichever `log_call()`/adapter
+  call inside the `with` block pushes the trace over the limit -- meant to
+  break a runaway agent loop as soon as it goes over, not to gate a call
+  before it happens. `trace_id`, if not given, defaults to a generated
+  UUID4 hex, yielded to the block so the caller can pass it to every
+  `log_call(..., trace_id=...)`/adapter call it wants counted against this
+  guard; calls with no `trace_id`, or a different one, are invisible to it.
+  Calling `guard()` with neither limit raises `ValueError` immediately (a
+  no-op guard is far more likely a caller mistake than an intentional one).
+- The call that trips `BudgetExceededError` is still written to the log
+  first: the real API call already happened and already cost money by the
+  time `log_call()`/an adapter is invoked, so silently dropping its record
+  would misrepresent actual spend to `report`/`detect`/`BudgetDetector`.
+  `BudgetExceededError` is a signal to stop the *next* call in this trace,
+  not a way to undo the one that just ran.
+- Accounting is purely in-memory, per `CostTracker` instance, keyed by
+  `trace_id`: two `guard()` blocks (even nested, even with overlapping
+  lifetimes) using different `trace_id`s track fully independent totals,
+  and all state for a `trace_id` is discarded the instant its `with` block
+  exits (normally or via exception) -- re-entering `guard()` with the same
+  `trace_id` afterward starts a clean count.
+
+### Note
+This is **enforcement, not detection** -- the opposite trade-off from
+`[0.9.2]`'s `budget`/`BudgetDetector`: `guard()` is in-process and
+per-`with`-block, so it can stop a loop the instant it overspends, but two
+processes (or two `CostTracker` instances) sharing a `trace_id` are
+invisible to each other, and it is not a daily/monthly budget -- it
+forgets everything when the block exits. `budget`/`BudgetDetector` is the
+opposite: cross-process, month-long, but purely after-the-fact. Neither
+mechanism substitutes for the other; both are documented side by side in
+README so they aren't conflated.
+
 ## [0.9.2] - 2026-07-07
 
 ### Added

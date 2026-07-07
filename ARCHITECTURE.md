@@ -104,7 +104,11 @@ users who actually opted into X.
 ```
 src/llm_burnwatch/
 ├── tracker.py          CostTracker: log_call() + SDK-response adapters
-│                        (openai/anthropic/gemini/ollama), build_report()
+│                        (openai/anthropic/gemini/ollama), build_report(),
+│                        guard() (in-process, per-trace_id spend/call-count
+│                        enforcement -- BudgetExceededError; distinct from
+│                        detectors/budget_detector.py's cross-process,
+│                        post-hoc BudgetDetector)
 ├── logreader.py         iter_log_records() (rotation + directory-mode
 │                        merge + corrupt-line skipping), parse_date(),
 │                        filter_by_period(), check_scale()
