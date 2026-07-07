@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.5] - 2026-07-07
+
+### Added
+- `CostTracker.log_langchain_result()`: adapter for a LangChain chat model
+  result, following the same `_get()`-based, no-SDK-import pattern as the
+  four existing adapters (openai/anthropic/gemini/ollama). Tries
+  `result.usage_metadata` first -- the modern, provider-standardized field
+  current `langchain-core` populates on every returned `AIMessage`
+  (`input_tokens`/`output_tokens`, with `input_token_details.cache_read` as
+  a subset of `input_tokens`, subtracted the same way OpenAI/Gemini's
+  cached-token counters are) -- and falls back to the older
+  `result.llm_output["token_usage"]` shape from the `.generate()`/
+  `.agenerate()` `LLMResult` API (provider-specific field names, commonly
+  OpenAI-style `prompt_tokens`/`completion_tokens`; no cache accounting
+  attempted in this fallback, since that older shape doesn't standardize
+  one). No new pip extra: exactly like the other four adapters, this reads
+  fields off whatever object the caller already has, never importing
+  `langchain` itself.
+
+### Verified (no code change)
+- `test_tracker_litellm_adapter.py` confirms `log_openai_response()` already
+  works, unmodified, against a `litellm.ModelResponse`-shaped object:
+  LiteLLM normalizes every provider it wraps to the same OpenAI-compatible
+  response shape (`.model`, `.usage.prompt_tokens`/`.completion_tokens`,
+  `.usage.prompt_tokens_details.cached_tokens`) that `log_openai_response()`
+  already reads via `_get()`. Per the plan's "test first, write code only
+  if the test actually needs it" rule for this milestone: it didn't, so no
+  `log_litellm_response()` was written -- this fact is recorded here as the
+  reproducible result of that check, not just a commit-message note.
+
 ## [0.9.4] - 2026-07-07
 
 ### Added

@@ -560,6 +560,72 @@ class CostTracker:
             **extra,
         )
 
+    def log_langchain_result(
+        self,
+        result: Any,
+        *,
+        label: str,
+        model: str | None = None,
+        trace_id: str | None = None,
+        **extra: Any,
+    ) -> dict:
+        """Adapter for a LangChain chat model result (or an equivalent
+        dict). Tries two shapes, in priority order:
+
+        1. `result.usage_metadata` -- the modern, provider-standardized
+           field LangChain populates on the returned `AIMessage` for every
+           major provider as of the current `langchain-core`:
+           `{"input_tokens": ..., "output_tokens": ..., "input_token_details":
+           {"cache_read": ...}}`. Unlike `log_openai_response`'s
+           `prompt_tokens`/`completion_tokens` naming, LangChain already
+           normalizes the field names themselves across providers here, not
+           just the shape -- `cache_read` (if present) is a *subset* of
+           `input_tokens` (same subset convention as OpenAI/Gemini), so it is
+           subtracted out, not added on top.
+        2. `result.llm_output["token_usage"]` -- the older `LLMResult`
+           shape from the `.generate()`/`.agenerate()` API, which nests
+           usage under `llm_output` and did not normalize field names: it
+           carries provider-specific keys (commonly OpenAI-style
+           `prompt_tokens`/`completion_tokens`, since LangChain historically
+           only normalized message content there, not every provider's
+           token-usage field names). No cache-token accounting is attempted
+           in this fallback path.
+
+        `usage_metadata` is tried first since it's what current LangChain
+        versions populate; the `llm_output` path is only a fallback for
+        callers still on the older result object.
+        """
+        usage_metadata = _get(result, "usage_metadata")
+        if usage_metadata is not None:
+            raw_input_tokens = _get(usage_metadata, "input_tokens", 0) or 0
+            output_tokens = _get(usage_metadata, "output_tokens", 0) or 0
+            input_details = _get(usage_metadata, "input_token_details")
+            cached_tokens = _get(input_details, "cache_read", 0) or 0
+            input_tokens = max(raw_input_tokens - cached_tokens, 0)
+            response_metadata = _get(result, "response_metadata")
+            resolved_model = (
+                model
+                or _get(response_metadata, "model_name")
+                or _get(response_metadata, "model")
+            )
+        else:
+            llm_output = _get(result, "llm_output")
+            token_usage = _get(llm_output, "token_usage")
+            input_tokens = _get(token_usage, "prompt_tokens", 0) or 0
+            output_tokens = _get(token_usage, "completion_tokens", 0) or 0
+            cached_tokens = 0
+            resolved_model = model or _get(llm_output, "model_name")
+
+        return self.log_call(
+            label=label,
+            model=resolved_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached_tokens,
+            trace_id=trace_id,
+            **extra,
+        )
+
     def _read_records(self):
         return iter_log_records(self._read_path)
 

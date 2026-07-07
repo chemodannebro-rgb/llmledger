@@ -95,7 +95,16 @@ tracker.log_gemini_response(response, label="chat")
 # (or your own pricing=); only pass the final chunk if you're streaming.
 response = ollama_client.chat(...)
 tracker.log_ollama_response(response, label="chat", cost=0.0)
+
+# LangChain — reads AIMessage.usage_metadata (current langchain-core), or
+# falls back to the older LLMResult.llm_output["token_usage"] shape.
+result = chat_model.invoke(...)
+tracker.log_langchain_result(result, label="chat")
 ```
+
+**LiteLLM**: no separate adapter needed — `litellm.completion(...)` returns a
+`ModelResponse` that normalizes every provider to the same OpenAI-compatible
+shape, so `log_openai_response(response, label="chat")` already works as-is.
 
 Each adapter accounts for that provider's own cache-token billing rules
 (subset vs. additive counters) so `cached_input_tokens` always means "billed

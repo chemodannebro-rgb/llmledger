@@ -29,8 +29,11 @@ This is enforced two ways, not just documented:
   from `report`/`demo-data`/`detect`-without-a-model/`validate`/`schema`/
   `dashboard` imports `scikit-learn`/`skops` at module level.
 
-**Checklist for adding a new dependency** (e.g. a hypothetical LangChain/
-CrewAI/AutoGen adapter extra):
+**Checklist for adding a new dependency** (e.g. a hypothetical CrewAI/AutoGen
+adapter extra -- `log_langchain_result()` (0.9.5) turned out *not* to need
+this: like the other four adapters, it reads fields via `_get()` off
+whatever object the caller already has, without importing `langchain` at
+all, so no new extra was warranted):
 
 1. It goes behind a **new** extra (e.g. `llm-burnwatch[langchain]`), never
    into `dependencies = []` or an existing extra whose users didn't ask
@@ -110,7 +113,9 @@ users who actually opted into X.
 ```
 src/llm_burnwatch/
 ├── tracker.py          CostTracker: log_call() + SDK-response adapters
-│                        (openai/anthropic/gemini/ollama), build_report(),
+│                        (openai/anthropic/gemini/ollama/langchain --
+│                        LiteLLM needs no adapter of its own, see
+│                        CHANGELOG.md [0.9.5]), build_report(),
 │                        guard() (in-process, per-trace_id spend/call-count
 │                        enforcement -- BudgetExceededError; distinct from
 │                        detectors/budget_detector.py's cross-process,
