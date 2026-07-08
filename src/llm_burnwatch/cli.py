@@ -359,21 +359,36 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        records = list(iter_log_records(args.log_file))
+        all_records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
         error(str(exc))
         return 2
 
-    check_scale(args.log_file, len(records))
-    records = filter_by_period(records, args.since, args.until)
+    check_scale(args.log_file, len(all_records))
+    records = filter_by_period(all_records, args.since, args.until)
     pricing = resolve_pricing(args.pricing_file)
+    # `budget_records` is the unfiltered log: the dashboard's budget block
+    # mirrors `report`'s -- budget tracking is about this calendar month's
+    # actual spend, not whatever --since/--until period the rest of the
+    # dashboard was asked to summarize (see `_budget_status_for()`).
     if fx_legacy:
         html = render_dashboard(
-            records, pricing, rub_rate=fx_rate, since=args.since, until=args.until
+            records,
+            pricing,
+            rub_rate=fx_rate,
+            since=args.since,
+            until=args.until,
+            budget_records=all_records,
         )
     else:
         html = render_dashboard(
-            records, pricing, fx_rate=fx_rate, currency=currency, since=args.since, until=args.until
+            records,
+            pricing,
+            fx_rate=fx_rate,
+            currency=currency,
+            since=args.since,
+            until=args.until,
+            budget_records=all_records,
         )
 
     try:

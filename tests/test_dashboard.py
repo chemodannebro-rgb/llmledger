@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 import json
+import re
 import stat
+from datetime import datetime, timezone
 
 import pytest
 
+from llm_burnwatch.budget import save_budget
 from llm_burnwatch.cli import main
 from llm_burnwatch.dashboard import render_dashboard
 from llm_burnwatch.demo_data import write_demo_log
-from llm_burnwatch.tracker import build_report, load_default_pricing
+from llm_burnwatch.tracker import build_report, load_default_pricing, user_budget_path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_xdg_config(tmp_path, monkeypatch):
+    # `render_dashboard()` now unconditionally calls `load_budget(...)`, which
+    # reads $XDG_CONFIG_HOME/llm-burnwatch/budget.json -- point every test in
+    # this file at a throwaway directory so they never read (or are affected
+    # by) the real developer's ~/.config/llm-burnwatch/budget.json, the same
+    # isolation `test_cli_budget.py` already applies to budget-related CLI
+    # tests.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
 
 
 def _write_records(log_path, records):
@@ -326,3 +340,203 @@ def test_dashboard_cli_requires_log_file_and_out_arguments(tmp_path, capsys):
     with pytest.raises(SystemExit) as exc_info:
         main(["dashboard", "--log-file", str(tmp_path / "demo.jsonl")])
     assert exc_info.value.code == 2
+
+
+# --- 1.0.1: Dashboard 2.0 -----------------------------------------------------
+
+
+def test_render_dashboard_active_detectors_baseline_count_matches_summary_card():
+    # `render_dashboard()` now runs the full detector registry (1.0.1-a),
+    # not just baseline z-score. The "baseline anomalies flagged" summary
+    # card and the "Active detectors" table's Baseline row both derive from
+    # the same `alerts` list (`kind == "zscore_outlier"` vs `detector ==
+    # "baseline"`) -- for this detector every alert is both, so the two
+    # counts must always agree.
+    day_a_normal = [
+        {
+            "label": "summarize",
+            "model": "gpt-4o",
+            "input_tokens": 800 + i,
+            "output_tokens": 150 + i,
+            "cost_micros": 2000 + i,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+        for i in range(20)
+    ]
+    day_a_outlier = {
+        "label": "summarize",
+        "model": "gpt-4o",
+        "input_tokens": 50_000,
+        "output_tokens": 10_000,
+        "cost_micros": 200_000,
+        "timestamp": "2026-01-01T00:00:00+00:00",
+    }
+    records = day_a_normal + [day_a_outlier]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    card_match = re.search(
+        r'baseline anomalies flagged</div><div class="value">(\d+)', result
+    )
+    table_match = re.search(
+        r"<td>Baseline \(z-score\)</td><td>enabled</td><td>[^<]*</td><td>(\d+)</td>", result
+    )
+    assert card_match is not None
+    assert table_match is not None
+    assert card_match.group(1) == table_match.group(1) == "1"
+
+
+def test_render_dashboard_alert_timeline_shows_non_baseline_alert():
+    # 1.0.1-b: the per-day alert timeline is not limited to baseline
+    # z-score findings -- a budget alert (a different detector entirely)
+    # must also show up in that day's `<ul class="alert-list">`.
+    save_budget(user_budget_path(), monthly_usd=1.0, warn_at_fraction=0.8)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+00:00")
+    records = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 2_000_000,  # $2, over the $1 monthly budget
+            "timestamp": today,
+        }
+    ]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    assert '<h4>Alerts</h4><ul class="alert-list">' in result
+    assert "budget: budget_exceeded" in result
+    assert "exceeds monthly budget" in result
+
+
+def test_render_dashboard_budget_block_three_states(tmp_path):
+    # 1.0.1-c: not configured -> no section; configured, no records this
+    # month -> one-line message; configured with a status -> progress bar.
+    pricing = load_default_pricing()
+
+    not_configured = render_dashboard([], pricing)
+    assert "<h2>Budget</h2>" not in not_configured
+
+    save_budget(user_budget_path(), monthly_usd=100.0, warn_at_fraction=0.8)
+    old_month_record = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 500_000,
+            "timestamp": "2020-01-01T00:00:00+00:00",
+        }
+    ]
+    no_records_yet = render_dashboard(old_month_record, pricing)
+    assert "no records this month yet" in no_records_yet
+    assert "configured ($100.00/month)" in no_records_yet
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+00:00")
+    current_month_record = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 1_000_000,
+            "timestamp": today,
+        }
+    ]
+    with_status = render_dashboard(current_month_record, pricing)
+    assert '<div class="budget-bar">' in with_status
+    assert "within budget" in with_status
+    assert "month-to-date: $1.00" in with_status
+    assert "budget: $100.00" in with_status
+
+
+def test_render_dashboard_sparklines_differ_between_labels_with_different_trends():
+    # 1.0.1-d: sparklines are normalized per-row (own max), so two labels
+    # with opposite day-to-day trends must render different point lists.
+    records = [
+        {
+            "label": "a",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 100_000,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+        {
+            "label": "a",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 400_000,
+            "timestamp": "2026-01-02T00:00:00+00:00",
+        },
+        {
+            "label": "b",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 400_000,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+        {
+            "label": "b",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 100_000,
+            "timestamp": "2026-01-02T00:00:00+00:00",
+        },
+    ]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    idx_a = result.index("<td>a</td>")
+    idx_b = result.index("<td>b</td>")
+    row_a = result[idx_a : result.index("</tr>", idx_a)]
+    row_b = result[idx_b : result.index("</tr>", idx_b)]
+
+    assert '<polyline points="' in row_a
+    assert '<polyline points="' in row_b
+    assert row_a != row_b
+
+
+def test_render_dashboard_active_detectors_section_lists_all_five():
+    # 1.0.1-e: transparency section -- every detector shows up, even ones
+    # that never fired and even when budget tracking isn't configured.
+    pricing = load_default_pricing()
+
+    result = render_dashboard([], pricing)
+
+    assert "<h2>Active detectors</h2>" in result
+    assert "Baseline (z-score)" in result
+    assert "Frequency" in result
+    assert "Level-shift (CUSUM)" in result
+    assert "Rules (hard limits)" in result
+    assert "not configured" in result  # Budget row, unconfigured
+
+
+def test_render_dashboard_active_detectors_shows_budget_configured():
+    save_budget(user_budget_path(), monthly_usd=50.0, warn_at_fraction=0.8)
+    pricing = load_default_pricing()
+
+    result = render_dashboard([], pricing)
+
+    assert "configured ($50.00/month)" in result
+
+
+def test_render_dashboard_stays_under_300kb_on_demo_scale_log(tmp_path):
+    # 1.0.1-f: explicit size regression barrier -- sparklines/alert
+    # timeline must not make the single-file HTML balloon past the
+    # documented budget on demo-data-scale logs.
+    log_path = tmp_path / "demo.jsonl"
+    write_demo_log(log_path, n_normal=200, n_anomalies=10)
+    records = [json.loads(line) for line in log_path.read_text().splitlines()]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    assert len(result.encode("utf-8")) < 300_000

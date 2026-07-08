@@ -14,10 +14,14 @@ platform — whether that's a single JSONL file on one machine, or a small
 team's calls merged from multiple processes via directory mode.
 
 A `dashboard` command also turns that log into a single static HTML file
-(no JS, no external services) — see the CLI table below.
+(no JS, no external services) — summary cards, a budget progress bar, cost
+totals by label/model with per-day sparklines, an "Active detectors" table,
+and a daily journal with a full alert timeline (baseline/frequency/CUSUM/
+rules/budget) — see the CLI table below.
 
-![llm-burnwatch dashboard: summary cards, cost totals by label/model, and an
-expandable daily journal with anomaly badges](docs/dashboard.png)
+![llm-burnwatch dashboard: summary cards, a budget progress bar, cost totals
+by label/model with sparklines, an active-detectors table, and an expandable
+daily journal with anomaly and alert-severity badges](docs/dashboard.png)
 
 ## Quickstart
 

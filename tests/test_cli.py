@@ -840,6 +840,11 @@ def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):
         raise AssertionError("network call attempted")
 
     monkeypatch.setattr(socket, "socket", _no_sockets)
+    # `report`/`dashboard` both read $XDG_CONFIG_HOME/llm-burnwatch/budget.json
+    # (via `load_budget`) regardless of whether a budget was ever configured
+    # -- point it at a throwaway directory so this test never depends on (or
+    # is affected by) the real developer's own budget.json.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
 
     log_path = _demo_log(tmp_path, n_normal=200, n_anomalies=10)
 
@@ -871,4 +876,13 @@ def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):
     validate_exit = main(["validate", "--log-file", str(log_path)])
     captured = capsys.readouterr()
     assert validate_exit == 0
+    assert "unexpected error" not in captured.err
+
+    # `dashboard` now runs the full detector registry and reads budget.json
+    # (1.0.1) -- neither should ever touch the network either.
+    dashboard_exit = main(
+        ["dashboard", "--log-file", str(log_path), "--out", str(tmp_path / "dash.html")]
+    )
+    captured = capsys.readouterr()
+    assert dashboard_exit == 0
     assert "unexpected error" not in captured.err

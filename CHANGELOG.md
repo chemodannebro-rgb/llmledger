@@ -2,6 +2,63 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.1] - 2026-07-08
+
+Dashboard 2.0: brings `dashboard --out file.html` up to the same level of
+detail already available via `report`/`detect`, still as a single offline
+HTML file with no new dependency, network call, or JavaScript.
+
+### Changed
+- `dashboard.py` now runs the full detector registry
+  (`detectors.engine.run_detectors()` -- baseline z-score, frequency,
+  CUSUM level-shift, rules, budget) instead of only the baseline z-score
+  analyzer, mirroring `detect`'s auto-mode defaults (no CLI flags are added
+  to `dashboard` itself, so frequency/rules/budget behave exactly as they
+  would with no `--threshold`/`--allowed-models`/etc. overrides).
+- The daily journal's per-day entries now show a `severity-badge`
+  (highest severity alert that day, across every detector) alongside the
+  existing `anomaly-badge` (unchanged: still scoped to baseline z-score
+  findings only), plus an expandable "Alerts" list of every alert from
+  every detector that fired that day.
+- `render_dashboard()` gained an optional `budget_records` keyword
+  parameter: the unfiltered log, used only to compute the budget block,
+  so that block reports the same month-to-date/forecast numbers as
+  `report`'s "budget:" section even when the rest of the dashboard is
+  scoped by `--since`/`--until`. Defaults to `records` when omitted, so
+  every existing caller is unaffected.
+
+### Added
+- A "Budget" section, mirroring `report`'s three-state budget UX: nothing
+  shown when budget tracking isn't configured; a one-line message when
+  configured but the log has no records yet in the current UTC calendar
+  month; otherwise a progress bar plus the same month-to-date/projected
+  month-end/budget numbers `report` prints, sourced from the same
+  `detectors.budget_detector.compute_budget_status()`.
+- Inline-SVG cost and call-count sparklines, one per label/model row in
+  the "Totals for this period" tables, showing that name's day-by-day
+  trend across the period (each sparkline is normalized to its own max,
+  not comparable across rows -- the standard sparkline convention).
+- An "Active detectors" table listing all five detectors, whether each is
+  enabled (including *why* frequency is auto-disabled on short logs), its
+  threshold/parameters, and how many alerts it raised this period --
+  transparency into what's actually being watched, not just what fired.
+
+### Fixed
+- `dashboard`'s test suite is now isolated from the real
+  `$XDG_CONFIG_HOME/llm-burnwatch/budget.json`: since `render_dashboard()`
+  now always calls `load_budget()`, tests that didn't set `XDG_CONFIG_HOME`
+  could previously read (and be affected by) a developer's real local
+  budget config.
+- `tests/test_core_commands_make_no_network_attempts` now also exercises
+  `dashboard` (previously untested there) since it now reads `budget.json`
+  and runs the full detector registry -- confirming neither makes a
+  network call either.
+
+### Added (tests)
+- A regression test asserting the rendered HTML stays under 300 KB on a
+  demo-data-scale log, guarding against the new sections/sparklines
+  growing faster than the log itself.
+
 ## [1.0.0] - 2026-07-07
 
 Closes four debts identified by the post-v0.9.0 audit.
