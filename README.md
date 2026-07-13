@@ -14,14 +14,23 @@ platform — whether that's a single JSONL file on one machine, or a small
 team's calls merged from multiple processes via directory mode.
 
 A `dashboard` command also turns that log into a single static HTML file
-(no JS, no external services) — summary cards, a budget progress bar, cost
-totals by label/model with per-day sparklines, an "Active detectors" table,
-and a daily journal with a full alert timeline (baseline/frequency/CUSUM/
-rules/budget) — see the CLI table below.
+(no external services, no CDN, no network call — just a small amount of
+inline vanilla JS for sorting/filtering/copying, no external library) —
+summary cards, a budget progress bar, cost totals by label/model with
+per-day sparklines and dual-currency amounts, sortable/filterable tables,
+one-click copy of exact values, an "Active detectors" table, and a daily
+journal with a full alert timeline (baseline/frequency/CUSUM/rules/budget)
+— see the CLI table below.
 
 ![llm-burnwatch dashboard: summary cards, a budget progress bar, cost totals
 by label/model with sparklines, an active-detectors table, and an expandable
 daily journal with anomaly and alert-severity badges](docs/dashboard.png)
+
+**Full documentation:** [`docs/index.md`](docs/index.md) is the start of a
+per-topic documentation site (one page per detector, security model,
+`budget` vs `guard()`, a comparison to Langfuse/LiteLLM/Helicone, FAQ) —
+build it locally with `pip install -e ".[docs]" && mkdocs serve`, or just
+browse the individual `docs/*.md` files directly on GitHub.
 
 ## Quickstart
 

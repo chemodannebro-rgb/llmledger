@@ -1,9 +1,10 @@
 """Command-line interface for llm-burnwatch.
 
-Ten subcommands:
+Eleven subcommands:
   report          -- cost summary read back from a log
   demo-data       -- write a synthetic log with a known number of injected anomalies
   detect          -- baseline (+ optional ML cross-check) anomaly detection over a log
+  status          -- show which detectors are on/off/learning for a log, without detecting
   train           -- train an IsolationForest model (requires `llm-burnwatch[anomaly]`)
   schema          -- print the packaged JSONL log schema
   validate        -- check a log's records against the packaged JSON schema
@@ -12,7 +13,7 @@ Ten subcommands:
   budget set/show -- configure/inspect a monthly USD budget for detect/report
   import otel     -- import an OpenTelemetry GenAI trace export (local file only) into a log
 
-`report`/`demo-data`/`schema`/`validate`/`dashboard`/`detect`/`train`/`budget`/
+`report`/`demo-data`/`schema`/`status`/`validate`/`dashboard`/`detect`/`train`/`budget`/
 `import otel` never make a network call. `detect` only imports scikit-learn indirectly, via
 `registry.load_model` deserializing (via `skops.io`) an existing model -- if
 none exists yet, `detect` runs baseline-only and never touches scikit-learn
@@ -43,16 +44,31 @@ import os
 import sys
 import time
 from collections import deque
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
 from . import __version__
 from ._messages import error, warn
+from .alert_text import (
+    _CONSOLE_NEXT_STEP_HINTS,
+    _HUMAN_FEATURE_NAMES,
+    _INCIDENT_TYPE_LABELS,
+    _format_baseline_score_for_console,
+    _format_cusum_for_console,
+    _format_frequency_for_console,
+    _human_feature_name,
+    _incident_type_label,
+    _render_alert_for_console,
+)
 from .anomaly.constants import (
     CONTAMINATION,
+    CUSUM_H_MULTIPLIER,
     FOLLOW_WINDOW_SIZE,
+    FREQUENCY_WINDOW_SECONDS,
+    FREQUENCY_Z_THRESHOLD,
     KEEP_LAST_DEFAULT,
+    SENSITIVITY_MULTIPLIERS,
     Z_SCORE_THRESHOLD,
 )
 from .anomaly.features import (
@@ -71,7 +87,7 @@ from .detectors.budget_detector import BudgetDetector, compute_budget_status
 from .detectors.cusum_detector import CusumDetector
 from .detectors.engine import run_detectors
 from .detectors.frequency_detector import FrequencyDetector
-from .detectors.protocol import ALERT_SCHEMA_VERSION
+from .detectors.protocol import ALERT_SCHEMA_VERSION, Alert
 from .detectors.rules_detector import RulesDetector
 from .follow_state import load_follow_state, save_follow_state, state_path_for
 from .logreader import (
@@ -253,10 +269,80 @@ def _print_budget_status(status: dict) -> None:
         )
 
 
+def _log_file_not_found_error(exc: FileNotFoundError) -> None:
+    """D4: `iter_log_records()`'s `FileNotFoundError` only ever says "log
+    path does not exist: <path>" -- on its own that tells a user *what* is
+    wrong but not what to do about it. Every one of `report`/`dashboard`/
+    `status`/`detect`/`train`/`validate` hits this same failure the same
+    way (missing/mistyped --log-file, or a first run before any calls have
+    been logged yet), so the remedy is appended here once instead of
+    repeated six times with six chances to drift.
+    """
+    error(
+        f"{exc}. Check that --log-file points at the right path, or run "
+        "`llm-burnwatch demo-data --out <path>` to generate a demo log to "
+        "try this command on."
+    )
+
+
+def _empty_log_onboarding_lines(log_file: str) -> list[str]:
+    """E1: a log with zero records ever (not just zero matching some
+    --since/--until/--trace-id filter) is the very first screen 100% of new
+    users see -- there is nothing yet to filter, tune, or diagnose, so print
+    the three-step quickstart (same steps/snippet as docs/index.md) instead
+    of a dead-end "no records found". Deliberately does not attempt to
+    detect the caller's SDK/stack (that's `init`, E2, planned for v1.1) --
+    just the generic three steps that work for anyone.
+    """
+    return [
+        f"{log_file!r} has no records yet -- nothing has been logged to it.",
+        "",
+        "1. Log your first call:",
+        "",
+        "     from llm_burnwatch import CostTracker",
+        f"     tracker = CostTracker({log_file!r})",
+        "     tracker.log_call(",
+        '         label="summarize",',
+        '         model="gpt-4o-mini",',
+        "         input_tokens=800,",
+        "         output_tokens=150,",
+        "     )",
+        "",
+        "   Already calling an OpenAI/Anthropic/Gemini/Ollama SDK? Use the matching",
+        "   log_<provider>_response() helper instead of computing tokens yourself --",
+        "   see docs/connecting.md.",
+        "",
+        f"2. See what it cost: llm-burnwatch report --log-file {log_file}",
+        "",
+        "3. See anomaly detection work without waiting for real traffic:",
+        "     llm-burnwatch demo-data --out demo.jsonl",
+        "     llm-burnwatch detect --log-file demo.jsonl",
+    ]
+
+
+# `report`'s default period when neither --since/--until/--all-time is
+# given. Most users asking "what am I spending" mean recently, not the
+# entire history of a log that may span years -- but the old all-time
+# default is still one flag away (--all-time), and any explicit
+# --since/--until always takes precedence over this default.
+_DEFAULT_REPORT_WINDOW_DAYS = 30
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     if args.json and args.format == "csv":
         error("--json and --format csv are mutually exclusive")
         return 2
+
+    if args.all_time and (args.since or args.until):
+        error("--all-time cannot be combined with --since/--until")
+        return 2
+
+    used_default_period = False
+    if not args.all_time and args.since is None and args.until is None:
+        used_default_period = True
+        args.since = (
+            datetime.now(timezone.utc).date() - timedelta(days=_DEFAULT_REPORT_WINDOW_DAYS)
+        ).isoformat()
 
     try:
         fx_rate, currency, fx_legacy = _resolve_fx(args)
@@ -267,7 +353,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     try:
         raw_records = iter_log_records(args.log_file)
     except FileNotFoundError as exc:
-        error(str(exc))
+        _log_file_not_found_error(exc)
         return 2
 
     counts = {"total": 0, "dropped_period": 0}
@@ -286,21 +372,50 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 0
 
     budget_status, budget_config = _budget_status_for(args)
+    # Surfaced in --json so a script can tell the default 30-day window was
+    # applied (`used_default_period`) rather than silently getting a
+    # narrower report than it expected -- `since`/`until` reflect the
+    # *effective* period (including the default), `all_time` whether
+    # --all-time was given.
+    period_payload = {
+        "since": args.since,
+        "until": args.until,
+        "all_time": bool(args.all_time),
+    }
 
     if result["call_count"] == 0:
         if args.json:
             payload = dict(result)
+            payload["period"] = period_payload
             if budget_status is not None:
                 payload["budget"] = budget_status
             print(json.dumps(payload, indent=2))
             return 0
         _print_header(pricing)
-        if args.trace_id is not None:
+        if counts["total"] == 0:
+            # E1: genuinely nothing in this log at all (not merely nothing
+            # matching --since/--until/--trace-id/--all-time) -- checked
+            # ahead of those filter-specific messages below, since e.g. the
+            # default 30-day window would otherwise tell a brand-new user to
+            # pass --all-time, which would show the same empty result and
+            # dead-end them right back here.
+            for line in _empty_log_onboarding_lines(args.log_file):
+                print(line)
+        elif args.trace_id is not None:
             print(f"no records found for trace_id {args.trace_id!r}")
-        elif args.since or args.until:
-            print("no records found in the given period")
+        elif used_default_period:
+            print(
+                f"no records found in the last {_DEFAULT_REPORT_WINDOW_DAYS} days "
+                "(use --all-time to see the full log)"
+            )
         else:
-            print("no records found in log")
+            # args.since/args.until: the only remaining way to reach this
+            # branch with counts["total"] > 0 -- every other combination
+            # that could leave call_count == 0 either matches an earlier
+            # branch above or (all_time with no other filter) would have
+            # made call_count == counts["total"], already excluded by the
+            # counts["total"] == 0 check above.
+            print("no records found in the given period")
         if budget_status is not None:
             _print_budget_status(budget_status)
         elif budget_config is not None:
@@ -312,6 +427,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = dict(result)
+        payload["period"] = period_payload
         if fx_rate is not None:
             if fx_legacy:
                 payload["rub_rate"] = fx_rate
@@ -361,7 +477,7 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     try:
         all_records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
-        error(str(exc))
+        _log_file_not_found_error(exc)
         return 2
 
     check_scale(args.log_file, len(all_records))
@@ -501,15 +617,36 @@ def _run_ml_cross_check(records: list[dict], model_dir: str) -> dict | None:
     }
 
 
+def _resolve_effective_threshold(args: argparse.Namespace) -> tuple[float, float]:
+    """Resolves `--threshold`/`--sensitivity` into `(effective_threshold,
+    multiplier)`. The two flags are mutually exclusive at the argparse
+    level (see `detect_p`'s parser setup), so this never has to arbitrate
+    a conflict between them: `--threshold` is the advanced escape hatch
+    that has existed since before `--sensitivity`, and only ever affected
+    `BaselineDetector`; `--sensitivity` is the new coarse low/normal/high
+    preset that scales all three threshold-like detectors together via
+    `SENSITIVITY_MULTIPLIERS`. When `--threshold` is given explicitly, it's
+    used as-is for the baseline detector and the multiplier stays 1.0
+    (`args.sensitivity`'s default, "normal") for the others -- giving
+    `--threshold` on its own the exact same effect it had before
+    `--sensitivity` existed.
+    """
+    multiplier = SENSITIVITY_MULTIPLIERS[args.sensitivity]
+    if args.threshold is not None:
+        return args.threshold, multiplier
+    return Z_SCORE_THRESHOLD * multiplier, multiplier
+
+
 def _detect_registry(args: argparse.Namespace, budget_config: dict | None) -> list:
     """The detector registry `detect`/`detect --follow` both build from the
     same CLI flags (plus `budget_config`, loaded fresh from `budget.json` by
     the caller) -- kept in one place so the two entry points can't drift.
     """
+    effective_threshold, multiplier = _resolve_effective_threshold(args)
     return [
-        BaselineDetector(threshold=args.threshold),
-        FrequencyDetector(),
-        CusumDetector(),
+        BaselineDetector(threshold=effective_threshold),
+        FrequencyDetector(z_threshold=FREQUENCY_Z_THRESHOLD * multiplier),
+        CusumDetector(h_multiplier=CUSUM_H_MULTIPLIER * multiplier),
         RulesDetector(
             allowed_models=args.allowed_models,
             max_call_cost_usd=args.max_call_cost,
@@ -529,19 +666,25 @@ def _budget_config() -> dict | None:
     return load_budget(user_budget_path())
 
 
-def _frequency_enabled_for(records: list[dict], args: argparse.Namespace) -> tuple[bool, bool]:
+def _frequency_enabled_for(records: list[dict], frequency_detector: str) -> tuple[bool, bool]:
     """Returns `(frequency_enabled, seasonal_available)` for this batch of
     `records`, applying `--frequency-detector`'s auto/on/off decision.
+
+    Takes the raw flag value rather than the full `args` namespace so this
+    (and `_detector_status_lines` below, which calls it) can be reused
+    outside of `detect`'s own argparse namespace -- e.g. by a future
+    `status`-style command that has no `--frequency-detector` flag of its
+    own and just wants `detect`'s default ("auto") decision for a log.
     """
     seasonal_available = has_seasonal_coverage(records)
-    if args.frequency_detector == "auto":
+    if frequency_detector == "auto":
         frequency_enabled = seasonal_available
     else:
-        frequency_enabled = args.frequency_detector == "on"
+        frequency_enabled = frequency_detector == "on"
     return frequency_enabled, seasonal_available
 
 
-def _cusum_enabled_for(args: argparse.Namespace) -> bool:
+def _cusum_enabled_for(cusum_detector: str) -> bool:
     """Returns whether `CusumDetector` should run, from `--cusum-detector`.
 
     Unlike `_frequency_enabled_for`, there's no log-dependent "auto" case:
@@ -549,9 +692,111 @@ def _cusum_enabled_for(args: argparse.Namespace) -> bool:
     cost/token level shift isn't subject to the day-of-week false-positive
     risk that justifies the frequency detector's seasonal gating (see
     `CusumDetector`'s docstring) -- so `--cusum-detector` is a plain on/off
-    switch.
+    switch. Takes the raw flag value for the same reusability reason as
+    `_frequency_enabled_for` above.
     """
-    return args.cusum_detector == "on"
+    return cusum_detector == "on"
+
+
+def _detector_status_lines(
+    records: list[dict],
+    budget_config: dict | None,
+    *,
+    frequency_detector: str = "auto",
+    cusum_detector: str = "on",
+) -> list[tuple[str, str, str]]:
+    """One `(detector_name, state, message)` triple per detector whose
+    enabled state isn't a fixed, always-on default -- `frequency` (auto/
+    seasonal-gated), `cusum` (plain on/off), `budget` (gated by whether a
+    budget is configured). `state` is one of `"on"`, `"off"`, `"learning"`
+    -- `"learning"` only applies to `frequency` in `"auto"` mode without
+    enough seasonal coverage yet, since that's the only detector whose
+    off-state is data-dependent rather than a deliberate user/config
+    choice. Reuses `_frequency_enabled_for`/`_cusum_enabled_for` and
+    `seasonal_coverage_message` rather than recomputing any gating logic,
+    so this and `cmd_detect` can never disagree about whether a detector
+    is active for a given log. Intended as the shared source of truth for
+    both `detect`'s own status line and a future `status` command.
+    """
+    frequency_enabled, seasonal_available = _frequency_enabled_for(records, frequency_detector)
+    if frequency_enabled:
+        frequency_state = "on"
+    elif frequency_detector == "auto" and not seasonal_available:
+        frequency_state = "learning"
+    else:
+        frequency_state = "off"
+
+    cusum_enabled = _cusum_enabled_for(cusum_detector)
+    cusum_state = "on" if cusum_enabled else "off"
+    cusum_message = (
+        "watching for sustained cost/token level shifts"
+        if cusum_enabled
+        else "disabled (--cusum-detector off)"
+    )
+
+    if budget_config is None:
+        budget_state = "off"
+        budget_message = "no monthly budget configured (see `llm-burnwatch budget set`)"
+    else:
+        budget_state = "on"
+        budget_message = f"watching monthly budget (${budget_config['monthly_usd']:.2f}/month)"
+
+    return [
+        ("frequency", frequency_state, seasonal_coverage_message(records)),
+        ("cusum", cusum_state, cusum_message),
+        ("budget", budget_state, budget_message),
+    ]
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Traffic-light summary of which gated detectors (`frequency`/`cusum`/
+    `budget`) are on/off/learning for this log, without running detection
+    itself -- `detect`/`detect --follow` remain the only commands that
+    actually flag anomalies. Reuses `_detector_status_lines` (the same
+    on/off/learning semantics `detect` itself would use with its own
+    defaults) so `status` and `detect` can never disagree about whether a
+    detector is active for a given log. Always takes `detect`'s plain
+    defaults (`frequency_detector="auto"`, `cusum_detector="on"`) rather
+    than exposing its own `--frequency-detector`/`--cusum-detector` flags,
+    since its purpose is to answer "what would detect do right now", not
+    to let a user preview an override.
+    """
+    try:
+        records = list(iter_log_records(args.log_file))
+    except FileNotFoundError as exc:
+        _log_file_not_found_error(exc)
+        return 2
+
+    check_scale(args.log_file, len(records))
+
+    budget_config = _budget_config()
+    detector_lines = _detector_status_lines(records, budget_config)
+
+    if args.json:
+        payload = {
+            "call_count": len(records),
+            "detectors": [
+                {"name": name, "state": state, "message": message}
+                for name, state, message in detector_lines
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if not records:
+        # E1: an empty log has no meaningful on/off/learning state to show
+        # yet (every detector is trivially "no data" at once) -- print the
+        # same onboarding as `report` instead of a summary that's just noise
+        # for a brand-new log.
+        for line in _empty_log_onboarding_lines(args.log_file):
+            print(line)
+        return 0
+
+    print(f"analyzed {len(records)} call(s)")
+    name_width = max(len(name) for name, _state, _message in detector_lines)
+    for name, state, message in detector_lines:
+        print(f"{name.ljust(name_width)}: {state.upper():<8} {message}")
+    return 0
 
 
 def cmd_detect(args: argparse.Namespace) -> int:
@@ -566,7 +811,7 @@ def cmd_detect(args: argparse.Namespace) -> int:
     try:
         records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
-        error(str(exc))
+        _log_file_not_found_error(exc)
         return 2
 
     check_scale(args.log_file, len(records))
@@ -598,10 +843,11 @@ def cmd_detect(args: argparse.Namespace) -> int:
     # `FrequencyDetector`'s docstring). `--frequency-detector on/off`
     # overrides that decision explicitly in either direction, the same
     # override pattern already used for `RulesDetector`'s CLI flags.
-    frequency_enabled, seasonal_available = _frequency_enabled_for(records, args)
-    cusum_enabled = _cusum_enabled_for(args)
+    frequency_enabled, seasonal_available = _frequency_enabled_for(records, args.frequency_detector)
+    cusum_enabled = _cusum_enabled_for(args.cusum_detector)
     budget_config = _budget_config()
     budget_enabled = budget_config is not None
+    effective_threshold, _ = _resolve_effective_threshold(args)
 
     alerts = run_detectors(
         records,
@@ -636,7 +882,8 @@ def cmd_detect(args: argparse.Namespace) -> int:
         payload = {
             "alert_schema_version": ALERT_SCHEMA_VERSION,
             "call_count": len(records),
-            "threshold": args.threshold,
+            "threshold": effective_threshold,
+            "sensitivity": args.sensitivity,
             "anomaly_count": len(anomalous),
             "insufficient_data_count": insufficient_count,
             "anomalies": [
@@ -705,32 +952,43 @@ def cmd_detect(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
     else:
         _print_header(pricing)
-        print(f"analyzed {len(records)} call(s) (threshold={args.threshold})")
+        print(
+            f"analyzed {len(records)} call(s) "
+            f"(threshold={effective_threshold}, sensitivity={args.sensitivity})"
+        )
         if insufficient_count:
             print(f"{insufficient_count} call(s) had insufficient history and were skipped")
         if not anomalous:
             print("no anomalies found")
+        else:
+            print(f"{len(anomalous)} {_INCIDENT_TYPE_LABELS[('baseline', 'zscore_outlier')]}(s) found:")
         for i, a in anomalous:
             r = records[i]
             print(f"- [{i}] {r.get('label')} / {r.get('model')} @ {r.get('timestamp')}")
             for s in a.evidence["scores"]:
-                print(f"    {s['reason']}")
+                print(f"    {_format_baseline_score_for_console(s)}")
+        if anomalous:
+            print(f"  -> {_CONSOLE_NEXT_STEP_HINTS['baseline']}")
         if rule_violations:
             print(f"{len(rule_violations)} rule violation(s) found:")
             for a in rule_violations:
-                print(f"- [{a.record_ref}] {a.kind}: {a.message}")
+                print(f"- [{a.record_ref}] {_incident_type_label(a)}: {a.message}")
+            print(f"  -> {_CONSOLE_NEXT_STEP_HINTS['rules']}")
         if frequency_enabled and frequency_spikes:
-            print(f"{len(frequency_spikes)} frequency spike(s) found:")
+            print(f"{len(frequency_spikes)} {_INCIDENT_TYPE_LABELS[('frequency', 'frequency_spike')]} found:")
             for a in frequency_spikes:
-                print(f"- [{a.record_ref}] {a.group_key}: {a.message}")
+                print(f"- [{a.record_ref}] {a.group_key}: {_render_alert_for_console(a)}")
+            print(f"  -> {_CONSOLE_NEXT_STEP_HINTS['frequency']}")
         if cusum_enabled and level_shifts:
-            print(f"{len(level_shifts)} level shift(s) found:")
+            print(f"{len(level_shifts)} {_INCIDENT_TYPE_LABELS[('cusum', 'level_shift')]}(s) found:")
             for a in level_shifts:
-                print(f"- [{a.record_ref}] {a.group_key}: {a.message}")
+                print(f"- [{a.record_ref}] {a.group_key}: {_render_alert_for_console(a)}")
+            print(f"  -> {_CONSOLE_NEXT_STEP_HINTS['cusum']}")
         if budget_enabled and budget_alerts:
             print(f"{len(budget_alerts)} budget alert(s) found:")
             for a in budget_alerts:
-                print(f"- [{a.record_ref}] {a.kind}: {a.message}")
+                print(f"- [{a.record_ref}] {_incident_type_label(a)}: {a.message}")
+            print(f"  -> {_CONSOLE_NEXT_STEP_HINTS['budget']}")
         if ml_info is not None and ml_info.get("available"):
             print(
                 f"ML cross-check (model v{ml_info['model_version']}): "
@@ -784,8 +1042,8 @@ def _detect_follow_poll(
     records = list(window)
     new_start_index = len(records) - len(new_records)
 
-    frequency_enabled, _ = _frequency_enabled_for(records, args)
-    cusum_enabled = _cusum_enabled_for(args)
+    frequency_enabled, _ = _frequency_enabled_for(records, args.frequency_detector)
+    cusum_enabled = _cusum_enabled_for(args.cusum_detector)
     budget_config = _budget_config()
     alerts = run_detectors(
         records,
@@ -931,13 +1189,18 @@ def cmd_train(args: argparse.Namespace) -> int:
     try:
         records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
-        error(str(exc))
+        _log_file_not_found_error(exc)
         return 2
 
     check_scale(args.log_file, len(records))
 
     if not records:
-        error("no records found in log; nothing to train on")
+        error(
+            "no records found in log; nothing to train on. Log some calls "
+            "first (CostTracker.guard()/log_call(), or one of the "
+            "log_<provider>_response() helpers), or point --log-file at an "
+            "existing log that already has traffic in it."
+        )
         return 2
 
     try:
@@ -1046,7 +1309,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     try:
         records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
-        error(str(exc))
+        _log_file_not_found_error(exc)
         return 2
 
     schema_text = resources.files("llm_burnwatch").joinpath("schema.json").read_text(encoding="utf-8")
@@ -1098,13 +1361,16 @@ def _cmd_validate_alerts(args: argparse.Namespace) -> int:
     try:
         alerts_text = Path(args.alerts_file).read_text(encoding="utf-8")
     except OSError as exc:
-        error(str(exc))
+        error(f"{exc}. Check that --alerts-file points at the right path.")
         return 2
 
     try:
         alert = json.loads(alerts_text)
     except json.JSONDecodeError as exc:
-        error(f"{args.alerts_file}: invalid JSON: {exc}")
+        error(
+            f"{args.alerts_file}: invalid JSON: {exc}. Expected the output of "
+            "`llm-burnwatch detect --json` (a single alert object)."
+        )
         return 2
 
     schema_text = (
@@ -1178,6 +1444,14 @@ def build_parser() -> argparse.ArgumentParser:
         "specific request across retries/sub-calls)",
     )
     report_p.add_argument(
+        "--all-time",
+        action="store_true",
+        help=(
+            "Report over the entire log instead of the default last "
+            f"{_DEFAULT_REPORT_WINDOW_DAYS} days. Cannot be combined with --since/--until."
+        ),
+    )
+    report_p.add_argument(
         "--json", action="store_true", help="Print a machine-readable JSON summary"
     )
     report_p.add_argument(
@@ -1242,7 +1516,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     detect_p = subparsers.add_parser("detect", help="Detect anomalous calls in a log")
     detect_p.add_argument("--log-file", required=True)
-    detect_p.add_argument("--threshold", type=float, default=Z_SCORE_THRESHOLD)
+    sensitivity_group = detect_p.add_mutually_exclusive_group()
+    sensitivity_group.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help=(
+            "Advanced: override the baseline detector's raw modified z-score "
+            "threshold directly (default: %g). Mutually exclusive with "
+            "--sensitivity; most users should use --sensitivity instead."
+        )
+        % Z_SCORE_THRESHOLD,
+    )
+    sensitivity_group.add_argument(
+        "--sensitivity",
+        choices=sorted(SENSITIVITY_MULTIPLIERS),
+        default="normal",
+        help=(
+            "How aggressively to flag anomalies across all detectors: 'low' "
+            "(fewer alerts), 'normal' (default), or 'high' (more alerts). "
+            "Mutually exclusive with --threshold."
+        ),
+    )
     detect_p.add_argument("--model-dir", default="models")
     detect_p.add_argument(
         "--pricing-file", default=None, help="Override pricing.json with a custom file"
@@ -1373,6 +1668,16 @@ def build_parser() -> argparse.ArgumentParser:
     schema_p = subparsers.add_parser("schema", help="Print the JSONL log schema")
     schema_p.set_defaults(handler=cmd_schema)
 
+    status_p = subparsers.add_parser(
+        "status",
+        help="Show which detectors are on/off/learning for a log, without running detection",
+    )
+    status_p.add_argument("--log-file", required=True)
+    status_p.add_argument(
+        "--json", action="store_true", help="Print a machine-readable JSON summary"
+    )
+    status_p.set_defaults(handler=cmd_status)
+
     validate_p = subparsers.add_parser(
         "validate", help="Check a log's records against the packaged JSON schema"
     )
@@ -1464,7 +1769,15 @@ def main(argv=None) -> int:
     try:
         return args.handler(args)
     except Exception as exc:  # unexpected failure -> exit code 2, not a raw traceback
-        error(f"unexpected error: {exc}")
+        # D4: unlike every other error() call in this module, there's no
+        # command-specific remedy to suggest here by definition -- this
+        # branch only ever fires for a bug, not a user mistake. The one
+        # universal next step is reporting it, so point at the tracker
+        # instead of leaving the user with just the raw exception text.
+        error(
+            f"unexpected error: {exc}. This looks like a bug -- please report it at "
+            "https://github.com/chemodannebro-rgb/llm-burnwatch/issues"
+        )
         return 2
 
 

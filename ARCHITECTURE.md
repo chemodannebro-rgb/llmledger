@@ -11,7 +11,7 @@ PR re-deriving it from scratch in its own notes.
 
 | Extra | Adds | Used by |
 |---|---|---|
-| *(none — core)* | nothing | `CostTracker`, its SDK-response adapters, `report`, `demo-data`, `detect` (baseline-only), `validate`, `schema`, `dashboard` |
+| *(none — core)* | nothing | `CostTracker`, its SDK-response adapters, `report`, `demo-data`, `detect` (baseline-only), `status`, `validate`, `schema`, `dashboard` |
 | `llm-burnwatch[anomaly]` | `scikit-learn`, `skops` | `train`; `detect`'s ML cross-check (only once a model has actually been trained) |
 | `llm-burnwatch[dev]` | `pytest`, `jsonschema`, `hypothesis` | running the test suite — never imported by any shipped code path |
 
@@ -26,8 +26,8 @@ This is enforced two ways, not just documented:
   (`anomaly/train.py`, `anomaly/registry.py`) is imported lazily, inside a
   `try/except ImportError`, only from the one CLI handler that needs it
   (`cmd_train`, and `cmd_detect`'s ML cross-check). No module reachable
-  from `report`/`demo-data`/`detect`-without-a-model/`validate`/`schema`/
-  `dashboard` imports `scikit-learn`/`skops` at module level.
+  from `report`/`demo-data`/`detect`-without-a-model/`status`/`validate`/
+  `schema`/`dashboard` imports `scikit-learn`/`skops` at module level.
 
 **Checklist for adding a new dependency** (e.g. a hypothetical CrewAI/AutoGen
 adapter extra -- `log_langchain_result()` (0.9.5) turned out *not* to need

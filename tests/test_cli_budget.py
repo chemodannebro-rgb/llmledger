@@ -281,7 +281,12 @@ def test_detect_text_output_prints_budget_alert_line(tmp_path, capsys):
 
     assert exit_code == 1
     assert "budget alert(s) found" in captured.out
-    assert "budget_exceeded" in captured.out
+    # B2: the console prints the plain-language incident type ("budget
+    # exceeded"), not the raw `Alert.kind` ("budget_exceeded") -- the raw
+    # kind is still available verbatim via `--json` (see
+    # test_detect_flags_budget_exceeded_when_configured above).
+    assert "budget exceeded" in captured.out
+    assert "budget_exceeded" not in captured.out
 
 
 def test_detect_stays_silent_on_budget_when_within_budget_and_pace(tmp_path, capsys):

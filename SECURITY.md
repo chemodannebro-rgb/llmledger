@@ -111,36 +111,44 @@ implicitly, none run for one-shot `detect` (only `--follow`), and a failure
 in one sink (`sinks.protocol.send_to_all`) is caught, reported via `warn()`,
 and never stops the poll loop or the other configured sinks.
 
-**`WebhookSink`/`SlackSink`** (`webhook_sink.py`/`slack_sink.py`): an HTTP(S)
-POST of the alert (JSON, or a Slack-compatible `{"text": ...}` payload) to
-the URL you supply, using the same `urllib.request` + fixed 10s timeout
-discipline as `pricing import <url>`, including the same rejection of any
-non-`http(s)://` URL scheme (`file://`, etc.) at construction time, before
-any connection is attempted. The response body is never read (only
-`response.status` is inspected), so unlike `pricing import` there's no
-response-size cap to enforce -- nothing from the response is ever buffered.
-What you're trusting when you set this: the URL itself -- llm-burnwatch will
-send it every alert's full `evidence`/`message` payload, which can include
-`label`/model/cost data from your own log. Prefer the
-`LLM_BURNWATCH_WEBHOOK_URL`/`LLM_BURNWATCH_SLACK_WEBHOOK_URL` environment
-variables over the `--webhook-url`/`--slack-webhook-url` flags for a URL
-that embeds a secret token (e.g. a real Slack incoming-webhook URL), since
+**`WebhookSink`** (`webhook_sink.py`): an HTTP(S) POST of the alert's full
+`dataclasses.asdict(alert)` JSON (unaffected by B4 below -- this sink is for
+machine consumers, not chat) to the URL you supply, using the same
+`urllib.request` + fixed 10s timeout discipline as `pricing import <url>`,
+including the same rejection of any non-`http(s)://` URL scheme (`file://`,
+etc.) at construction time, before any connection is attempted. The response
+body is never read (only `response.status` is inspected), so unlike
+`pricing import` there's no response-size cap to enforce -- nothing from the
+response is ever buffered. What you're trusting when you set this: the URL
+itself -- llm-burnwatch will send it every alert's full `evidence`/`message`
+payload, which can include `label`/model/cost data from your own log. Prefer
+the `LLM_BURNWATCH_WEBHOOK_URL` environment variable over the
+`--webhook-url` flag for a URL that embeds a secret token, since
 command-line arguments are visible to other local users via `ps`.
 
-**`TelegramSink`** (`telegram_sink.py`) composes `WebhookSink` internally --
-it is not a fourth independent HTTP implementation, just a fixed
-`https://api.telegram.org/bot<token>/sendMessage` endpoint (the host is
-hard-coded by the sink, not caller-supplied, so there is no arbitrary URL/
-scheme to validate here) plus a plain-text message formatted exactly like
-`SlackSink`'s (`[severity] detector/kind: message`, no Markdown/HTML
-`parse_mode`, so there's no message-escaping logic that could be gotten
-wrong). What you're trusting: your bot token, embedded in that URL exactly
-like a real Slack incoming-webhook URL embeds its own secret -- a
-`SinkError` from a failed delivery includes the URL, so, like Slack, that
-error is only ever passed to local `warn()`, never sent anywhere else.
-Prefer `LLM_BURNWATCH_TELEGRAM_BOT_TOKEN`/`LLM_BURNWATCH_TELEGRAM_CHAT_ID`
-over `--telegram-bot-token`/`--telegram-chat-id` for the same `ps`-visibility
-reason as the webhook/Slack flags above.
+**`SlackSink`/`TelegramSink`** (`slack_sink.py`/`telegram_sink.py`) both
+compose `WebhookSink` internally for the HTTP POST/error handling, but post
+a single human-readable line (`alert_text.format_alert_oneline` -- severity
+as an emoji, a plain-language incident type, a money-first detail, and the
+record number, e.g. `"🚨 llm-burnwatch: rule violated: call cost limit
+exceeded -- call cost exceeded (record #3)"`) as a `{"text": ...}` payload,
+not the full `evidence` dict `WebhookSink` sends -- a chat message is meant
+to be read by a person glancing at a phone, not parsed by a machine. This
+line is plain text, never Markdown/HTML `parse_mode`, so there's no
+message-escaping logic that could be gotten wrong (the emoji are literal
+UTF-8 characters, not markup, so they don't reintroduce that risk).
+`TelegramSink` is not a third independent HTTP implementation: it is a
+fixed `https://api.telegram.org/bot<token>/sendMessage` endpoint (the host
+is hard-coded by the sink, not caller-supplied, so there is no arbitrary
+URL/scheme to validate here). What you're trusting when you set either of
+these: the destination itself (a Slack incoming-webhook URL, or a Telegram
+bot token embedded the same way) -- a `SinkError` from a failed delivery
+includes the URL, so that error is only ever passed to local `warn()`,
+never sent anywhere else. Prefer the
+`LLM_BURNWATCH_SLACK_WEBHOOK_URL`/`LLM_BURNWATCH_TELEGRAM_BOT_TOKEN`/
+`LLM_BURNWATCH_TELEGRAM_CHAT_ID` environment variables over
+`--slack-webhook-url`/`--telegram-bot-token`/`--telegram-chat-id` for the
+same `ps`-visibility reason as `--webhook-url` above.
 
 **`ExecSink`** (`exec_sink.py`) is the riskiest of the four: it runs a
 *local command you specify*, writing the alert JSON to its **stdin**. This

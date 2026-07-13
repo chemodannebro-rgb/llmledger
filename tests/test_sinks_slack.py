@@ -49,7 +49,10 @@ def test_send_posts_slack_compatible_text_payload(monkeypatch):
 
     assert captured["url"] == "https://hooks.slack.com/services/T/B/X"
     assert captured["body"] == {
-        "text": "[critical] rules/call_cost_exceeded: call cost exceeded"
+        "text": (
+            "\U0001f6a8 llm-burnwatch: rule violated: call cost limit exceeded "
+            "-- call cost exceeded (record #3)"
+        )
     }
 
 

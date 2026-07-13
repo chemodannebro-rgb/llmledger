@@ -10,15 +10,19 @@ sparklines) inside, a budget progress bar (same numbers as `report`'s
 and an "Active detectors" table showing what ran and what it found. Alerts
 reuse the same `detectors.engine.run_detectors()` full registry that
 `detect` uses -- not just the baseline z-score. No new third-party
-dependency, no external file/CDN reference, no network call, and no
-JavaScript (day entries use native `<details>`/`<summary>`) -- the whole
+dependency, no external file/CDN reference, and no network call -- the
 zero-dependency/no-network guarantee that applies to the rest of the core
-CLI applies here too.
+CLI applies here too. The one relaxation (1.0.2): a small amount of inline
+vanilla JavaScript powers table sorting, filtering, and copy-to-clipboard
+-- still no external library, no CDN, no network call, so it's not
+literally zero-script, but the "never leaves your machine" guarantee is
+unchanged.
 """
 
 from __future__ import annotations
 
 import html
+from typing import NamedTuple
 
 from ._messages import warn
 from .anomaly.constants import (
@@ -55,6 +59,62 @@ _DASHBOARD_DISCLAIMER = (
 )
 
 
+class _FxConfig(NamedTuple):
+    """Bundles the (mutually exclusive) currency-conversion options so
+    every money-rendering helper below can take one argument instead of
+    three, and so a dual-currency parenthetical is applied consistently
+    everywhere a cost appears -- not just the top summary card, which is
+    all the pre-1.0.2 code did.
+    """
+
+    rub_rate: float | None
+    fx_rate: float | None
+    currency: str | None
+
+
+def _format_usd(amount: float) -> str:
+    """Human-readable USD amount: thousands separator + 2 decimals for
+    anything that still rounds to a nonzero value at that precision.
+    Falls back to the old 6-decimal form *only* when 2 decimals would
+    silently render a real, nonzero micro-cost as "$0.00" -- this tool's
+    whole point is surfacing small per-call costs, so precision is never
+    dropped, only hidden by default when it isn't needed to see it.
+    """
+    if amount == 0 or round(amount, 2) != 0:
+        return f"${amount:,.2f}"
+    return f"${amount:.6f}"
+
+
+def _money_span(amount: float, fx: _FxConfig) -> str:
+    """Inline money markup: `_format_usd()`'s readable amount, an optional
+    dual-currency parenthetical when a rate is configured, and a
+    copy-to-clipboard button carrying the exact (6-decimal) value -- so
+    the full precision is always one click away even though it isn't the
+    default on-screen text. Used standalone (summary cards, budget text,
+    journal day summary) and inside table cells (see `_render_money_cell`).
+    """
+    display = _format_usd(amount)
+    if fx.rub_rate is not None:
+        display += f" (\u20bd{amount * fx.rub_rate:,.2f})"
+    elif fx.fx_rate is not None:
+        display += f" ({amount * fx.fx_rate:,.2f} {html.escape(str(fx.currency))})"
+    full = f"{amount:.6f}"
+    return (
+        f'<span class="money">{display}'
+        f'<button type="button" class="copy-btn" data-copy="{full}" '
+        f'aria-label="Copy exact value" title="Copy exact value">\u29c9</button></span>'
+    )
+
+
+def _render_money_cell(amount: float, fx: _FxConfig) -> str:
+    """`<td>` wrapper for `_money_span`, carrying the raw numeric amount in
+    `data-sort-value` -- the sort JS needs to order rows numerically, and
+    the formatted display string (thousands separator, currency symbol,
+    RUB parenthetical) is not itself sortable as text.
+    """
+    return f'<td data-sort-value="{amount:.6f}">{_money_span(amount, fx)}</td>'
+
+
 def _dashboard_registry(budget_config: dict | None) -> list:
     """Same shape as `cli._detect_registry()`, minus CLI-flag thresholds --
     `dashboard` has no `--threshold`/`--allowed-models`/`--max-call-cost`/
@@ -89,7 +149,7 @@ def _daily_breakdown(records: list[dict], alerts: list[Alert]) -> dict[str, dict
     "zscore_outlier"`) -- unchanged from before this module ran the full
     detector registry, so the existing `anomaly-badge` contract stays
     intact. `severity_counts`/`alerts` are additive: they cover every alert
-    from every detector (baseline included), for the new per-day alert
+    from every detector (baseline included), for the per-day alert
     timeline.
     """
     by_date: dict[str, dict] = {}
@@ -149,11 +209,11 @@ def _daily_breakdown(records: list[dict], alerts: list[Alert]) -> dict[str, dict
     return dict(sorted(by_date.items()))
 
 
-def _top_label(by_label_micros: dict[str, int]) -> str | None:
+def _top_label(by_label_micros: dict[str, int], fx: _FxConfig) -> str | None:
     if not by_label_micros:
         return None
     label, micros = max(by_label_micros.items(), key=lambda kv: kv[1])
-    return f"{html.escape(label)} (${micros / 1_000_000:.2f})"
+    return f"{html.escape(label)} ({_money_span(micros / 1_000_000, fx)})"
 
 
 def _render_day_bar(cost_micros: int, max_micros: int) -> str:
@@ -200,46 +260,57 @@ def _series_by_name(daily: dict[str, dict], key: str) -> dict[str, list[int]]:
     return {name: [daily[d][key].get(name, 0) for d in dates] for name in names}
 
 
-def _render_table(rows: dict[str, int]) -> str:
+def _render_table(rows: dict[str, int], fx: _FxConfig) -> str:
     if not rows:
         return "<p>No data.</p>"
     body = "".join(
-        f"<tr><td>{html.escape(str(key))}</td><td>${micros / 1_000_000:.6f}</td></tr>"
+        f"<tr><td>{html.escape(str(key))}</td>{_render_money_cell(micros / 1_000_000, fx)}</tr>"
         for key, micros in sorted(rows.items())
     )
-    return f"<table><thead><tr><th>Name</th><th>Cost</th></tr></thead><tbody>{body}</tbody></table>"
+    return (
+        '<table class="data-table"><thead><tr>'
+        '<th data-sort="text" aria-sort="none">Name</th>'
+        '<th data-sort="num" aria-sort="none">Cost</th>'
+        f"</tr></thead><tbody>{body}</tbody></table>"
+    )
 
 
 def _render_table_with_sparklines(
     totals: dict[str, int],
     cost_series: dict[str, list[int]],
     call_series: dict[str, list[int]],
+    fx: _FxConfig,
+    table_id: str,
 ) -> str:
     if not totals:
         return "<p>No data.</p>"
     body = "".join(
         f"<tr><td>{html.escape(str(key))}</td>"
-        f"<td>${micros / 1_000_000:.6f}</td>"
+        f"{_render_money_cell(micros / 1_000_000, fx)}"
         f"<td>{_render_sparkline(cost_series.get(key, []))}</td>"
         f"<td>{_render_sparkline(call_series.get(key, []))}</td>"
         "</tr>"
         for key, micros in sorted(totals.items())
     )
     return (
-        "<table><thead><tr><th>Name</th><th>Cost</th>"
+        f'<input type="search" class="filter-input" data-filter-target="{table_id}" '
+        f'placeholder="Filter by name\u2026" aria-label="Filter {html.escape(table_id)}">'
+        f'<table class="data-table" id="{table_id}"><thead><tr>'
+        '<th data-sort="text" aria-sort="none">Name</th>'
+        '<th data-sort="num" aria-sort="none">Cost</th>'
         "<th>Cost trend</th><th>Calls trend</th></tr></thead>"
         f"<tbody>{body}</tbody></table>"
     )
 
 
-def _render_journal(daily: dict[str, dict]) -> str:
+def _render_journal(daily: dict[str, dict], fx: _FxConfig) -> str:
     if not daily:
         return "<p>No dated records in this period.</p>"
 
     max_micros = max(day["cost_micros"] for day in daily.values())
     entries = []
     for date, day in sorted(daily.items(), reverse=True):
-        top_label = _top_label(day["by_label_micros"]) or "\u2014"
+        top_label = _top_label(day["by_label_micros"], fx) or "\u2014"
         anomaly_count = day["anomaly_count"]
         badge_class = "flagged" if anomaly_count else "clean"
         anomaly_text = str(anomaly_count) if anomaly_count else "\u2014"
@@ -268,23 +339,30 @@ def _render_journal(daily: dict[str, dict]) -> str:
             f'<summary>'
             f'<span class="day-date">{html.escape(date)}</span>'
             f'<span class="day-calls">{day["call_count"]} calls</span>'
-            f'<span class="day-cost">${day["cost_micros"] / 1_000_000:.6f}</span>'
+            f'<span class="day-cost">{_money_span(day["cost_micros"] / 1_000_000, fx)}</span>'
             f'<span class="day-bar">{_render_day_bar(day["cost_micros"], max_micros)}</span>'
             f'<span class="day-top-label">{top_label}</span>'
             f'<span class="anomaly-badge {badge_class}">{anomaly_text}</span>'
             f'<span class="severity-badge {top_severity}">{sev_text}</span>'
             f"</summary>"
             f'<div class="day-detail">'
-            f"<h4>By label</h4>{_render_table(day['by_label_micros'])}"
-            f"<h4>By model</h4>{_render_table(day['by_model_micros'])}"
+            f"<h4>By label</h4>{_render_table(day['by_label_micros'], fx)}"
+            f"<h4>By model</h4>{_render_table(day['by_model_micros'], fx)}"
             f"{alerts_html}"
             f"</div>"
             f"</details>"
         )
-    return "".join(entries)
+    entries_html = "".join(entries)
+    return (
+        '<input type="search" class="filter-input" data-filter-target="journal-list" '
+        'placeholder="Filter by date/label/model\u2026" aria-label="Filter daily journal">'
+        f'<div id="journal-list">{entries_html}</div>'
+    )
 
 
-def _render_budget_block(budget_config: dict | None, budget_status: dict | None) -> str:
+def _render_budget_block(
+    budget_config: dict | None, budget_status: dict | None, fx: _FxConfig
+) -> str:
     """Mirrors `cli._print_budget_status()`'s three-state UX (1.0.0-c):
     not configured -> nothing; configured, no records this month yet -> one
     line; configured with a status -> a progress bar plus the same numbers
@@ -295,8 +373,8 @@ def _render_budget_block(budget_config: dict | None, budget_status: dict | None)
         return ""
     if budget_status is None:
         return (
-            "<h2>Budget</h2><p>"
-            f"budget: configured (${budget_config['monthly_usd']:.2f}/month) "
+            '<h2 id="budget">Budget</h2><p>'
+            f"budget: configured ({_money_span(budget_config['monthly_usd'], fx)}/month) "
             "\u2014 no records this month yet</p>"
         )
 
@@ -322,13 +400,13 @@ def _render_budget_block(budget_config: dict | None, budget_status: dict | None)
         )
 
     return (
-        "<h2>Budget</h2>"
+        '<h2 id="budget">Budget</h2>'
         f'<p>month: {html.escape(str(budget_status["month"]))} \u2014 '
         f'<span class="budget-status {status_class}">{status_text}</span></p>'
         f'<div class="budget-bar"><div class="budget-bar-fill {status_class}" '
-        f'style="width:{fill_pct:.1f}%"></div></div>'
-        f"<p>month-to-date: ${month_to_date:.2f} / projected month-end: "
-        f"${forecast:.2f} / budget: ${monthly_usd:.2f}</p>"
+        f'style="width:{fill_pct:.1f}%">{fill_pct:.0f}%</div></div>'
+        f"<p>month-to-date: {_money_span(month_to_date, fx)} / projected month-end: "
+        f"{_money_span(forecast, fx)} / budget: {_money_span(monthly_usd, fx)}</p>"
         f"{low_confidence_html}"
     )
 
@@ -379,15 +457,79 @@ def _render_active_detectors(
     ]
     body = "".join(
         f"<tr><td>{html.escape(name)}</td><td>{html.escape(status)}</td>"
-        f"<td>{html.escape(threshold)}</td><td>{count}</td></tr>"
+        f"<td>{html.escape(threshold)}</td><td data-sort-value=\"{count}\">{count}</td></tr>"
         for name, status, threshold, count in rows
     )
     return (
-        "<h2>Active detectors</h2>"
-        "<table><thead><tr><th>Detector</th><th>Status</th>"
-        "<th>Threshold</th><th>Alerts</th></tr></thead>"
+        '<h2 id="active-detectors">Active detectors</h2>'
+        '<table class="data-table"><thead><tr>'
+        '<th data-sort="text" aria-sort="none">Detector</th><th>Status</th>'
+        '<th>Threshold</th><th data-sort="num" aria-sort="none">Alerts</th></tr></thead>'
         f"<tbody>{body}</tbody></table>"
     )
+
+
+_DASHBOARD_SCRIPT = """
+(function () {
+  "use strict";
+
+  function sortValue(cell) {
+    if (cell.hasAttribute("data-sort-value")) {
+      return parseFloat(cell.getAttribute("data-sort-value"));
+    }
+    return cell.textContent.trim().toLowerCase();
+  }
+
+  document.addEventListener("click", function (e) {
+    var th = e.target.closest("th[data-sort]");
+    if (th) {
+      var table = th.closest("table");
+      var tbody = table && table.querySelector("tbody");
+      if (!tbody) return;
+      var headerRow = th.parentElement;
+      var index = Array.prototype.indexOf.call(headerRow.children, th);
+      var ascending = th.getAttribute("aria-sort") !== "ascending";
+      Array.prototype.forEach.call(headerRow.children, function (other) {
+        if (other !== th) other.setAttribute("aria-sort", "none");
+      });
+      th.setAttribute("aria-sort", ascending ? "ascending" : "descending");
+      var rows = Array.prototype.slice.call(tbody.children);
+      rows.sort(function (a, b) {
+        var av = sortValue(a.children[index]);
+        var bv = sortValue(b.children[index]);
+        if (av < bv) return ascending ? -1 : 1;
+        if (av > bv) return ascending ? 1 : -1;
+        return 0;
+      });
+      rows.forEach(function (row) { tbody.appendChild(row); });
+      return;
+    }
+
+    var copyBtn = e.target.closest(".copy-btn");
+    if (copyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(copyBtn.getAttribute("data-copy")).then(function () {
+        copyBtn.classList.add("copied");
+        setTimeout(function () { copyBtn.classList.remove("copied"); }, 1500);
+      }, function () {});
+    }
+  });
+
+  document.addEventListener("input", function (e) {
+    var input = e.target.closest("[data-filter-target]");
+    if (!input) return;
+    var target = document.getElementById(input.getAttribute("data-filter-target"));
+    if (!target) return;
+    var query = input.value.trim().toLowerCase();
+    var items = target.tagName === "TABLE"
+      ? target.querySelectorAll("tbody > tr")
+      : target.children;
+    Array.prototype.forEach.call(items, function (item) {
+      var match = !query || item.textContent.toLowerCase().indexOf(query) !== -1;
+      item.style.display = match ? "" : "none";
+    });
+  });
+})();
+"""
 
 
 def render_dashboard(
@@ -409,7 +551,8 @@ def render_dashboard(
     `fx_rate`/`currency` is the generic replacement (any currency, shown by
     its ISO code, e.g. "90.00 RUB"); pass at most one of the two. Neither
     rate is ever fetched over the network -- both are fixed, manually
-    supplied values.
+    supplied values. As of 1.0.2, whichever rate is given is shown next to
+    *every* rendered cost, not just the top summary card.
 
     `since`/`until` are assumed to have already been applied to `records` by
     the caller (see `logreader.filter_by_period`) -- they are only used here
@@ -423,6 +566,8 @@ def render_dashboard(
     """
     if budget_records is None:
         budget_records = records
+
+    fx = _FxConfig(rub_rate=rub_rate, fx_rate=fx_rate, currency=currency)
 
     report = build_report(records, pricing)
 
@@ -464,13 +609,7 @@ def render_dashboard(
     else:
         period_line = "Period: all time"
 
-    total_cost_line = f"${report['total_cost_usd']:.6f}"
-    if rub_rate is not None:
-        rub_total = report["total_cost_usd"] * rub_rate
-        total_cost_line += f" (~\u20bd{rub_total:.2f} at {rub_rate:.2f} \u20bd/$)"
-    elif fx_rate is not None:
-        fx_total = report["total_cost_usd"] * fx_rate
-        total_cost_line += f" (~{fx_total:.2f} {currency} at {fx_rate:.2f} {currency}/$)"
+    total_cost_span = _money_span(report["total_cost_usd"], fx)
 
     last_updated = pricing.get("last_updated")
     last_updated_line = (
@@ -481,13 +620,21 @@ def render_dashboard(
 
     title = f"llm-burnwatch dashboard \u2014 {period_line[len('Period: '):]}"
 
-    budget_block = _render_budget_block(budget_config, budget_status)
+    budget_block = _render_budget_block(budget_config, budget_status, fx)
     active_detectors_block = _render_active_detectors(
         alerts,
         frequency_enabled=frequency_enabled,
         seasonal_available=seasonal_available,
         budget_config=budget_config,
     )
+
+    nav_links = []
+    if budget_config is not None:
+        nav_links.append('<a href="#budget">Budget</a>')
+    nav_links.append('<a href="#totals">Totals</a>')
+    nav_links.append('<a href="#active-detectors">Active detectors</a>')
+    nav_links.append('<a href="#daily-journal">Daily journal</a>')
+    section_nav = f'<nav class="section-nav">{"".join(nav_links)}</nav>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -496,52 +643,117 @@ def render_dashboard(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
-body {{ font-family: -apple-system, sans-serif; margin: 2rem; color: #1a1a1a; }}
-.disclaimer {{ background: #fff8e1; border: 1px solid #e0c46c; padding: 0.75rem 1rem; border-radius: 6px; }}
-.period {{ color: #555; font-weight: 600; }}
-.card {{ display: inline-block; background: #f5f5f5; border-radius: 8px; padding: 1rem 1.5rem; margin: 0.5rem 1rem 0.5rem 0; }}
-.card .value {{ font-size: 1.5rem; font-weight: bold; }}
-table {{ border-collapse: collapse; margin: 1rem 0; }}
-th, td {{ border: 1px solid #ddd; padding: 0.4rem 0.8rem; text-align: left; }}
-th {{ background: #f0f0f0; }}
-.bar {{ fill: #4c72b0; }}
-.spark-line {{ stroke: #4c72b0; stroke-width: 1.5; }}
-.day {{ border: 1px solid #ddd; border-radius: 6px; margin-bottom: 0.5rem; padding: 0 0.75rem; }}
+:root {{
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --border: #e2e2e6;
+  --surface: #ffffff;
+  --surface-alt: #f7f7fa;
+  --text: #1a1a1a;
+  --text-muted: #666;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 1.5rem 2rem 3rem;
+  color: var(--text);
+  background: var(--surface);
+  line-height: 1.5;
+}}
+h1 {{ font-size: 1.6rem; margin: 0.25rem 0 1rem; }}
+h2 {{ font-size: 1.2rem; margin: 2rem 0 0.75rem; scroll-margin-top: 3.5rem; }}
+h3 {{ font-size: 1rem; margin: 1.25rem 0 0.5rem; color: var(--text-muted); }}
+h4 {{ font-size: 0.9rem; margin: 0.75rem 0 0.35rem; }}
+.section-nav {{
+  position: sticky; top: 0; z-index: 20;
+  display: flex; flex-wrap: wrap; gap: 1.25rem;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0; margin-bottom: 0.5rem;
+}}
+.section-nav a {{ color: var(--accent); text-decoration: none; font-size: 0.9rem; font-weight: 600; }}
+.section-nav a:hover {{ text-decoration: underline; }}
+.disclaimer {{ background: #fff8e1; border: 1px solid #e0c46c; padding: 0.75rem 1rem; border-radius: 8px; }}
+.period {{ color: var(--text-muted); font-weight: 600; }}
+.cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.85rem; margin: 1rem 0; }}
+.card {{
+  background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1rem 1.25rem;
+}}
+.card .value {{ font-size: 1.4rem; font-weight: 700; margin-top: 0.15rem; }}
+.filter-input {{
+  display: block; width: 100%; max-width: 320px; margin: 0.5rem 0 0.75rem;
+  padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.9rem; color: var(--text); background: var(--surface);
+}}
+table.data-table {{ border-collapse: separate; border-spacing: 0; margin: 0.25rem 0 1rem; width: 100%; max-width: 640px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }}
+th, td {{ padding: 0.5rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }}
+th {{ background: var(--surface-alt); font-weight: 600; position: sticky; top: 2.9rem; }}
+th[data-sort] {{ cursor: pointer; user-select: none; }}
+th[data-sort]::after {{ content: "\\2195"; opacity: 0.35; margin-left: 0.35rem; font-size: 0.8em; }}
+th[aria-sort="ascending"]::after {{ content: "\\2191"; opacity: 1; color: var(--accent); }}
+th[aria-sort="descending"]::after {{ content: "\\2193"; opacity: 1; color: var(--accent); }}
+tbody tr:nth-child(even) {{ background: var(--surface-alt); }}
+tbody tr:hover {{ background: var(--accent-soft); }}
+tbody tr:last-child td {{ border-bottom: none; }}
+.money {{ white-space: nowrap; }}
+.copy-btn {{
+  border: none; background: none; cursor: pointer; opacity: 0.45;
+  font-size: 0.85em; margin-left: 0.3rem; padding: 0 0.15rem; color: inherit;
+}}
+.money:hover .copy-btn, .copy-btn:hover, .copy-btn:focus {{ opacity: 1; }}
+.copy-btn.copied {{ opacity: 1; color: #16a34a; }}
+.copy-btn.copied::after {{ content: " Copied"; font-size: 0.8em; }}
+.bar {{ fill: var(--accent); }}
+.spark-line {{ stroke: var(--accent); stroke-width: 1.5; }}
+.day {{ border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.6rem; padding: 0 0.9rem; }}
 .day summary {{
   display: grid;
-  grid-template-columns: 110px 90px 90px 110px 1fr 90px 90px;
+  grid-template-columns: 110px 90px 130px 110px 1fr 90px 90px;
   gap: 0.75rem;
   align-items: center;
   cursor: pointer;
-  padding: 0.6rem 0;
+  padding: 0.65rem 0;
+  list-style: none;
 }}
-.day-detail {{ padding: 0 0 0.75rem 0; }}
+.day summary::-webkit-details-marker {{ display: none; }}
+.day summary::before {{
+  content: "\\25B8"; display: inline-block; transition: transform 0.15s ease;
+  color: var(--text-muted); width: 0.75rem;
+}}
+.day[open] summary::before {{ transform: rotate(90deg); }}
+.day summary:hover {{ background: var(--accent-soft); border-radius: 6px; }}
+.day-detail {{ padding: 0 0 0.85rem 0; }}
 .alert-list {{ margin: 0.25rem 0; padding-left: 1.25rem; }}
-.anomaly-badge.flagged {{ color: #b5341a; font-weight: 600; }}
-.anomaly-badge.clean {{ color: #999; }}
-.severity-badge.critical {{ color: #b5341a; font-weight: 600; }}
-.severity-badge.warning {{ color: #b3811a; font-weight: 600; }}
-.severity-badge.info {{ color: #4c72b0; }}
-.severity-badge.clean {{ color: #999; }}
-.budget-bar {{ background: #eee; border-radius: 6px; height: 14px; width: 100%; max-width: 400px; overflow: hidden; }}
-.budget-bar-fill {{ height: 100%; }}
-.budget-bar-fill.ok {{ background: #4c9a4c; }}
+.anomaly-badge, .severity-badge {{
+  display: inline-block; padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.82rem;
+}}
+.anomaly-badge.flagged {{ color: #b5341a; background: #fdeae4; font-weight: 600; }}
+.anomaly-badge.clean {{ color: #888; background: var(--surface-alt); }}
+.severity-badge.critical {{ color: #b5341a; background: #fdeae4; font-weight: 600; }}
+.severity-badge.warning {{ color: #92660a; background: #fdf0d5; font-weight: 600; }}
+.severity-badge.info {{ color: var(--accent); background: var(--accent-soft); }}
+.severity-badge.clean {{ color: #888; background: var(--surface-alt); }}
+.budget-bar {{ background: var(--surface-alt); border-radius: 999px; height: 18px; width: 100%; max-width: 400px; overflow: hidden; border: 1px solid var(--border); }}
+.budget-bar-fill {{ height: 100%; font-size: 0.7rem; color: #fff; text-align: right; padding-right: 0.4rem; line-height: 18px; white-space: nowrap; }}
+.budget-bar-fill.ok {{ background: #3a9a5c; }}
 .budget-bar-fill.warn {{ background: #d1a52c; }}
 .budget-bar-fill.over {{ background: #b5341a; }}
-.budget-status.ok {{ color: #4c9a4c; }}
+.budget-status.ok {{ color: #3a9a5c; }}
 .budget-status.warn {{ color: #d1a52c; }}
 .budget-status.over {{ color: #b5341a; font-weight: 600; }}
 .budget-note {{ color: #888; font-size: 0.9rem; }}
 @media (prefers-color-scheme: dark) {{
-  body {{ background: #14161a; color: #e4e4e4; }}
-  .card {{ background: #22252b; }}
-  .day {{ border-color: #333; }}
-  th {{ background: #2a2d33; }}
-  th, td {{ border-color: #333; }}
-  .period {{ color: #aaa; }}
-  .budget-bar {{ background: #2a2d33; }}
+  :root {{
+    --accent: #818cf8; --accent-soft: #23253a; --border: #333;
+    --surface: #14161a; --surface-alt: #22252b; --text: #e4e4e4; --text-muted: #aaa;
+  }}
+  .disclaimer {{ background: #2a2410; border-color: #6b5a1e; }}
+  .anomaly-badge.flagged, .severity-badge.critical {{ background: #3a1f18; }}
+  .severity-badge.warning {{ background: #362c10; }}
 }}
 @media (max-width: 600px) {{
+  body {{ padding: 1rem 1rem 2rem; }}
   .day summary {{
     display: flex;
     flex-wrap: wrap;
@@ -561,21 +773,25 @@ th {{ background: #f0f0f0; }}
 </head>
 <body>
 <h1>llm-burnwatch dashboard</h1>
+{section_nav}
 <p class="disclaimer">{html.escape(_DASHBOARD_DISCLAIMER)}</p>
 <p class="period">{html.escape(period_line)}</p>
 {last_updated_line}
+<div class="cards">
 <div class="card"><div>calls</div><div class="value">{report['call_count']}</div></div>
-<div class="card"><div>total cost</div><div class="value">{total_cost_line}</div></div>
+<div class="card"><div>total cost</div><div class="value">{total_cost_span}</div></div>
 <div class="card"><div>baseline anomalies flagged</div><div class="value">{anomaly_count}</div></div>
+</div>
 {budget_block}
-<h2>Totals for this period</h2>
+<h2 id="totals">Totals for this period</h2>
 <h3>By label</h3>
-{_render_table_with_sparklines(report['by_label_micros'], cost_by_label, calls_by_label)}
+{_render_table_with_sparklines(report['by_label_micros'], cost_by_label, calls_by_label, fx, "by-label-table")}
 <h3>By model</h3>
-{_render_table_with_sparklines(report['by_model_micros'], cost_by_model, calls_by_model)}
+{_render_table_with_sparklines(report['by_model_micros'], cost_by_model, calls_by_model, fx, "by-model-table")}
 {active_detectors_block}
-<h2>Daily journal</h2>
-{_render_journal(daily)}
+<h2 id="daily-journal">Daily journal</h2>
+{_render_journal(daily, fx)}
+<script>{_DASHBOARD_SCRIPT}</script>
 </body>
 </html>
 """

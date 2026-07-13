@@ -2,11 +2,14 @@
 
 Same shape as `SlackSink`: composes `WebhookSink.post_json` instead of
 reimplementing the HTTP POST/error handling, and formats the alert as the
-same plain-text line Slack uses (`[severity] detector/kind: message`) rather
-than Telegram's Markdown/HTML `parse_mode`, so there's no message-formatting
-escaping to get right (Telegram's MarkdownV2 requires escaping a long list of
-characters in arbitrary alert text -- not worth the added failure mode for a
-notification line).
+same plain-text one-liner Slack uses (`alert_text.format_alert_oneline`,
+B4 -- severity emoji, plain-language incident type, money-first detail,
+record number) rather than Telegram's Markdown/HTML `parse_mode`, so there's
+no message-formatting escaping to get right (Telegram's MarkdownV2 requires
+escaping a long list of characters in arbitrary alert text -- not worth the
+added failure mode for a notification line). The emoji Slack/Telegram share
+are literal UTF-8 characters, not Markdown/HTML syntax, so this doesn't
+reintroduce the escaping risk `parse_mode` was dropped to avoid.
 
 Unlike webhook/Slack, the caller doesn't supply an arbitrary destination
 URL: `bot_token` and `chat_id` are supplied separately, and this sink builds
@@ -22,6 +25,7 @@ never includes the token-bearing path in the first place -- only
 
 from __future__ import annotations
 
+from ..alert_text import format_alert_oneline
 from ..detectors.protocol import Alert
 from .webhook_sink import TIMEOUT_SECONDS, WebhookSink
 
@@ -36,5 +40,5 @@ class TelegramSink:
         )
 
     def send(self, alert: Alert) -> None:
-        text = f"[{alert.severity}] {alert.detector}/{alert.kind}: {alert.message}"
+        text = format_alert_oneline(alert)
         self._webhook.post_json({"chat_id": self._chat_id, "text": text})

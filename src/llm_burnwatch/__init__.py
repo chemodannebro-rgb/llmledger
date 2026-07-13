@@ -2,4 +2,8 @@
 for LLM/agent calls.
 """
 
-__version__ = "0.7.0"
+from .tracker import BudgetExceededError, CostTracker
+
+__version__ = "0.9.0"
+
+__all__ = ["CostTracker", "BudgetExceededError", "__version__"]

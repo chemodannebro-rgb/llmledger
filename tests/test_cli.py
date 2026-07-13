@@ -4,12 +4,24 @@ import json
 import shutil
 import socket
 import sys
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
-from llm_burnwatch.cli import DISCLAIMER, _filter_report_records, main
-from llm_burnwatch.demo_data import prompt_regression, write_demo_log
+from llm_burnwatch.anomaly.constants import Z_SCORE_THRESHOLD
+from llm_burnwatch.cli import (
+    DISCLAIMER,
+    _detector_status_lines,
+    _filter_report_records,
+    _format_baseline_score_for_console,
+    _format_cusum_for_console,
+    _format_frequency_for_console,
+    _incident_type_label,
+    main,
+)
+from llm_burnwatch.detectors.protocol import Alert
+from llm_burnwatch.demo_data import model_swap, prompt_regression, runaway_loop, write_demo_log
 from llm_burnwatch.tracker import CostTracker
 
 
@@ -222,8 +234,12 @@ def test_report_command_on_empty_log_says_no_records(tmp_path, capsys):
     exit_code = main(["report", "--log-file", str(log_path)])
     captured = capsys.readouterr()
 
+    # E1: a genuinely empty log (0 records ever) gets onboarding steps
+    # instead of a dead-end "no records found" message.
     assert exit_code == 0
-    assert "no records found" in captured.out
+    assert "has no records yet" in captured.out
+    assert "Log your first call" in captured.out
+    assert "no records found" not in captured.out
 
 
 def test_report_command_prints_disclaimer_and_totals(tmp_path, capsys):
@@ -278,8 +294,11 @@ def test_report_empty_log_with_rub_rate_shows_no_records(tmp_path, capsys):
     exit_code = main(["report", "--log-file", str(log_path), "--rub-rate", "90"])
     captured = capsys.readouterr()
 
+    # E1: --rub-rate doesn't change the fact that this log is genuinely
+    # empty -- still onboarding, not "no records found".
     assert exit_code == 0
-    assert "no records found" in captured.out
+    assert "has no records yet" in captured.out
+    assert "no records found" not in captured.out
     assert "₽" not in captured.out
 
 
@@ -325,6 +344,27 @@ def test_report_since_until_filters_records(tmp_path, capsys):
     assert "calls: 2" in captured.out
 
 
+def test_report_since_until_excludes_all_records_shows_period_message_not_onboarding(
+    tmp_path, capsys
+):
+    # E1's onboarding only replaces the message for a genuinely empty log
+    # (0 records ever) -- a log that *has* data, just none in the requested
+    # --since/--until window, still gets the older "given period" message,
+    # not onboarding (there's nothing to onboard: the user already has data,
+    # they just filtered it all out).
+    log_path = tmp_path / "dated.jsonl"
+    _write_dated_records(log_path, ["2026-01-01"])
+
+    exit_code = main(
+        ["report", "--log-file", str(log_path), "--since", "2027-01-01", "--until", "2027-01-31"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "no records found in the given period" in captured.out
+    assert "has no records yet" not in captured.out
+
+
 def test_report_since_until_rejects_bad_date_format(tmp_path, capsys):
     log_path = tmp_path / "dated.jsonl"
     _write_dated_records(log_path, ["2026-01-01"])
@@ -335,6 +375,77 @@ def test_report_since_until_rejects_bad_date_format(tmp_path, capsys):
 
     assert exc_info.value.code == 2
     assert "must be YYYY-MM-DD" in captured.err
+
+
+def test_report_defaults_to_last_30_days_excluding_older_records(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    today = datetime.now(timezone.utc).date()
+    old_date = (today - timedelta(days=60)).isoformat()
+    recent_date = (today - timedelta(days=5)).isoformat()
+    _write_dated_records(log_path, [old_date, recent_date])
+
+    exit_code = main(["report", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "calls: 1" in captured.out
+
+
+def test_report_all_time_flag_includes_records_older_than_30_days(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    today = datetime.now(timezone.utc).date()
+    old_date = (today - timedelta(days=60)).isoformat()
+    recent_date = (today - timedelta(days=5)).isoformat()
+    _write_dated_records(log_path, [old_date, recent_date])
+
+    exit_code = main(["report", "--log-file", str(log_path), "--all-time"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "calls: 2" in captured.out
+
+
+def test_report_all_time_rejects_combination_with_since(tmp_path, capsys):
+    log_path = tmp_path / "dated.jsonl"
+    _write_dated_records(log_path, ["2026-01-01"])
+
+    exit_code = main(
+        ["report", "--log-file", str(log_path), "--all-time", "--since", "2026-01-01"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "--all-time cannot be combined with --since/--until" in captured.err
+
+
+def test_report_explicit_since_overrides_default_30_day_window(tmp_path, capsys):
+    """An explicit --since further in the past than 30 days must still work
+    (the default only applies when neither --since nor --until is given)."""
+    log_path = tmp_path / "dated.jsonl"
+    today = datetime.now(timezone.utc).date()
+    old_date = (today - timedelta(days=60)).isoformat()
+    _write_dated_records(log_path, [old_date])
+
+    exit_code = main(["report", "--log-file", str(log_path), "--since", old_date])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "calls: 1" in captured.out
+
+
+def test_report_json_period_reflects_default_30_day_window(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["report", "--log-file", str(log_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["period"]["all_time"] is False
+    assert payload["period"]["until"] is None
+    expected_since = (
+        datetime.now(timezone.utc).date() - timedelta(days=30)
+    ).isoformat()
+    assert payload["period"]["since"] == expected_since
 
 
 def test_report_json_flag_prints_machine_readable_summary(tmp_path, capsys):
@@ -436,7 +547,9 @@ def test_report_trace_id_filters_to_matching_records(tmp_path, capsys):
                 + "\n"
             )
 
-    exit_code = main(["report", "--log-file", str(log_path), "--trace-id", "req-1"])
+    # --all-time: this test is about --trace-id filtering, not the default
+    # 30-day period, and its records use a fixed (now old) calendar date.
+    exit_code = main(["report", "--log-file", str(log_path), "--trace-id", "req-1", "--all-time"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -600,6 +713,330 @@ def test_detect_command_cusum_detector_off_flag_disables_it(tmp_path, capsys):
     assert payload["level_shifts"] == []
 
 
+def test_format_baseline_score_for_console_renders_cost_as_dollars_not_micros():
+    # B1: cost_micros must speak in money, never raw micros -- the one
+    # feature (of the four baseline FEATURES) that has a currency at all.
+    score = {
+        "feature": "cost_micros",
+        "value": 91632.0,
+        "median": 4785.0,
+        "mad": 100.0,
+        "z_score": 12.3,
+        "is_extreme": False,
+    }
+    rendered = _format_baseline_score_for_console(score)
+    assert "$0.0916" in rendered
+    assert "$0.0048" in rendered
+    assert "91632" not in rendered
+    assert "z=" not in rendered
+    assert "MAD=" not in rendered
+
+
+def test_format_baseline_score_for_console_non_cost_feature_has_no_dollar_sign():
+    score = {
+        "feature": "output_tokens",
+        "value": 2571.0,
+        "median": 156.0,
+        "mad": 10.0,
+        "z_score": 16.5,
+        "is_extreme": False,
+    }
+    rendered = _format_baseline_score_for_console(score)
+    assert "$" not in rendered
+    assert "response length" in rendered
+    assert "higher than usual" in rendered
+
+
+def test_format_baseline_score_for_console_extreme_zero_spread_case():
+    score = {
+        "feature": "input_tokens",
+        "value": 500.0,
+        "median": 100.0,
+        "mad": 0.0,
+        "z_score": None,
+        "is_extreme": True,
+    }
+    rendered = _format_baseline_score_for_console(score)
+    assert "z=" not in rendered
+    assert "MAD" not in rendered
+    assert "exactly" in rendered
+
+
+def test_format_cusum_for_console_renders_cost_feature_as_dollars():
+    evidence = {
+        "feature": "cost_micros",
+        "cusum_value": 500.0,
+        "reference_median": 4785.0,
+        "h_threshold": 300.0,
+        "shift_started_at_record": 3,
+    }
+    rendered = _format_cusum_for_console(evidence)
+    assert "$0.0048" in rendered
+    assert "cusum=" not in rendered
+    assert "threshold=" not in rendered
+    assert "record 3" in rendered
+
+
+def test_format_frequency_for_console_mentions_expected_baseline():
+    evidence = {"window_start": "2026-01-01T00:00:00+00:00", "window_calls": 40, "expected_calls": 5.0}
+    rendered = _format_frequency_for_console(evidence)
+    assert "40 calls" in rendered
+    assert "normally about 5" in rendered
+
+
+def test_detect_command_console_output_uses_money_language_and_next_step_hint(tmp_path, capsys):
+    log_path = _scenario_log(tmp_path, prompt_regression())
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    captured = capsys.readouterr()
+
+    # B2: the console surfaces the plain-language incident type
+    # ("gradual cost increase"), not the raw detector/kind jargon
+    # ("cusum"/"level_shift") -- those remain available via --json.
+    assert "gradual cost increase(s) found" in captured.out
+    level_shift_section = captured.out.split("gradual cost increase(s) found:")[1]
+    # No raw jargon from the pre-B1 message format leaking into the console.
+    assert "cusum=" not in level_shift_section
+    assert "h_threshold=" not in level_shift_section
+    # A concrete next step is always shown alongside the finding.
+    assert "-> run `llm-burnwatch report --json`" in captured.out
+
+
+def test_incident_type_label_translates_known_detector_kind_pairs():
+    # B2: a fixed vocabulary of (detector, kind) -> plain incident type,
+    # never the raw snake_case `Alert.kind` a `--json` consumer sees.
+    cases = [
+        (("baseline", "zscore_outlier"), "cost/usage spike"),
+        (("cusum", "level_shift"), "gradual cost increase"),
+        (("frequency", "frequency_spike"), "unusually frequent calls"),
+        (("rules", "model_not_allowed"), "rule violated: model not allowed"),
+        (("rules", "call_cost_exceeded"), "rule violated: call cost limit exceeded"),
+        (("rules", "trace_cost_exceeded"), "rule violated: trace cost limit exceeded"),
+        (("budget", "budget_exceeded"), "budget exceeded"),
+        (("budget", "budget_pace_warning"), "budget pace warning"),
+    ]
+    for (detector, kind), expected_label in cases:
+        a = Alert(
+            detector=detector,
+            severity="warning",
+            kind=kind,
+            group_key="g",
+            record_ref=0,
+            evidence={},
+            message="irrelevant for this test",
+        )
+        assert _incident_type_label(a) == expected_label
+
+
+def test_incident_type_label_falls_back_to_raw_kind_for_unknown_pair():
+    # A future detector/kind not yet in the vocabulary must never crash the
+    # console renderer -- it just prints un-translated, same as today.
+    a = Alert(
+        detector="future_detector",
+        severity="warning",
+        kind="some_new_kind",
+        group_key="g",
+        record_ref=0,
+        evidence={},
+        message="irrelevant for this test",
+    )
+    assert _incident_type_label(a) == "some_new_kind"
+
+
+def test_detect_command_baseline_section_uses_incident_type_header(tmp_path, capsys):
+    log_path = tmp_path / "calls.jsonl"
+    write_demo_log(log_path, n_normal=60, n_anomalies=5, seed=42)
+
+    exit_code = main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    # B2: baseline anomalies get the same "N <incident type>(s) found:"
+    # header shape as the other three sections, instead of jumping
+    # straight into the per-record listing with no summary line.
+    assert "cost/usage spike(s) found:" in captured.out
+
+
+def test_detect_command_rule_violation_line_uses_incident_type_not_raw_kind(tmp_path, capsys):
+    log_path = tmp_path / "calls.jsonl"
+    record = {
+        "schema_version": "1.0",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "label": "x",
+        "model": "not-allowed-model",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cost_micros": 0,
+    }
+    with log_path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+    exit_code = main(
+        [
+            "detect",
+            "--log-file",
+            str(log_path),
+            "--allowed-models",
+            "some-other-model",
+            "--model-dir",
+            str(tmp_path / "models"),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "rule violation(s) found" in captured.out
+    assert "rule violated: model not allowed" in captured.out
+    assert "model_not_allowed" not in captured.out
+
+
+# B3: a permanent regression guard against internal statistics/algorithm
+# jargon and raw snake_case Alert.detector/Alert.kind values leaking into
+# `detect`'s plain-text console branch. `--json` is exempt on purpose --
+# these terms remain the correct, unchanged vocabulary for machine-readable
+# output (see the B1/B2 status notes in the plan for why `Alert.message`/
+# `evidence`/`--json` keys are a frozen contract, not covered by this test).
+_BANNED_CONSOLE_JARGON = (
+    "z=",
+    "MAD",
+    "cusum=",
+    "quantile",
+    "micros",
+    "zscore_outlier",
+    "level_shift",
+    "frequency_spike",
+    "budget_exceeded",
+    "budget_pace_warning",
+    "model_not_allowed",
+    "call_cost_exceeded",
+    "trace_cost_exceeded",
+)
+
+
+def _assert_no_banned_jargon(text):
+    for term in _BANNED_CONSOLE_JARGON:
+        assert term not in text, f"banned jargon {term!r} leaked into console output:\n{text}"
+
+
+def test_detect_console_output_never_leaks_internal_jargon_baseline(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=60, n_anomalies=5, seed=42)
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    _assert_no_banned_jargon(capsys.readouterr().out)
+
+
+def test_detect_console_output_never_leaks_internal_jargon_cusum(tmp_path, capsys):
+    log_path = _scenario_log(tmp_path, prompt_regression())
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    _assert_no_banned_jargon(capsys.readouterr().out)
+
+
+def test_detect_console_output_never_leaks_internal_jargon_frequency(tmp_path, capsys):
+    log_path = _scenario_log(tmp_path, runaway_loop())
+
+    main(
+        [
+            "detect",
+            "--log-file",
+            str(log_path),
+            "--model-dir",
+            str(tmp_path / "models"),
+            "--frequency-detector",
+            "on",
+        ]
+    )
+    _assert_no_banned_jargon(capsys.readouterr().out)
+
+
+def test_detect_console_output_never_leaks_internal_jargon_rules(tmp_path, capsys):
+    log_path = _scenario_log(tmp_path, model_swap())
+
+    main(
+        [
+            "detect",
+            "--log-file",
+            str(log_path),
+            "--model-dir",
+            str(tmp_path / "models"),
+            "--allowed-models",
+            "gpt-4o-mini",
+        ]
+    )
+    _assert_no_banned_jargon(capsys.readouterr().out)
+
+
+def test_detect_console_output_never_leaks_internal_jargon_budget(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    main(["budget", "set", "--monthly", "0.5", "--warn-at", "0.8"])
+    capsys.readouterr()
+
+    log_path = tmp_path / "calls.jsonl"
+    record = {
+        "schema_version": "1.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "label": "x",
+        "model": "gpt-4o",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cost_micros": 1_000_000,
+    }
+    with log_path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models")])
+    _assert_no_banned_jargon(capsys.readouterr().out)
+
+
+def test_detector_status_lines_reports_learning_state_for_short_log(tmp_path):
+    # Fewer than MIN_SEASONAL_SPAN_DAYS (14) calendar days -- frequency's
+    # "auto" mode can't yet attempt seasonal bucketing, which is a distinct
+    # state from a deliberate "off": the user hasn't turned anything off,
+    # the detector just doesn't have enough history yet.
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+    records = list(json.loads(line) for line in log_path.read_text().splitlines())
+
+    lines = _detector_status_lines(records, budget_config=None)
+    by_name = {name: (state, message) for name, state, message in lines}
+
+    assert by_name["frequency"][0] == "learning"
+    assert "insufficient data" in by_name["frequency"][1]
+    assert by_name["cusum"][0] == "on"
+    assert by_name["budget"][0] == "off"
+    assert "budget set" in by_name["budget"][1]
+
+
+def test_detector_status_lines_frequency_off_flag_is_off_not_learning(tmp_path):
+    # Explicitly turning frequency off is a different state from "learning"
+    # even though both mean "not currently running" -- an explicit --off
+    # should never be reported as if the detector were still waiting on data.
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+    records = list(json.loads(line) for line in log_path.read_text().splitlines())
+
+    lines = _detector_status_lines(records, budget_config=None, frequency_detector="off")
+    by_name = {name: state for name, state, _message in lines}
+
+    assert by_name["frequency"] == "off"
+
+
+def test_detector_status_lines_cusum_off_flag_reports_off_state():
+    lines = _detector_status_lines([], budget_config=None, cusum_detector="off")
+    by_name = {name: (state, message) for name, state, message in lines}
+
+    assert by_name["cusum"][0] == "off"
+    assert "off" in by_name["cusum"][1]
+
+
+def test_detector_status_lines_budget_configured_reports_on_state_with_amount():
+    lines = _detector_status_lines(
+        [], budget_config={"monthly_usd": 50.0, "warn_at_fraction": 0.8}
+    )
+    by_name = {name: (state, message) for name, state, message in lines}
+
+    assert by_name["budget"][0] == "on"
+    assert "50.00" in by_name["budget"][1]
+
+
 def test_detect_json_anomaly_features_include_human_readable_reason(tmp_path, capsys):
     # BACKLOG.md #2: the z-score/median/MAD breakdown was already printed in
     # human-readable form via `format_score()` in the non-JSON output, but
@@ -633,6 +1070,67 @@ def test_detect_command_threshold_override_changes_results(tmp_path, capsys):
     assert strict_payload["anomaly_count"] < lenient_payload["anomaly_count"]
 
 
+def test_detect_command_sensitivity_high_flags_more_than_low(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=200, n_anomalies=10)
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models"), "--json", "--sensitivity", "low"])
+    low_payload = json.loads(capsys.readouterr().out)
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models"), "--json", "--sensitivity", "high"])
+    high_payload = json.loads(capsys.readouterr().out)
+
+    assert low_payload["anomaly_count"] <= high_payload["anomaly_count"]
+    assert low_payload["sensitivity"] == "low"
+    assert high_payload["sensitivity"] == "high"
+    assert low_payload["threshold"] > high_payload["threshold"]
+
+
+def test_detect_command_default_sensitivity_matches_pre_sensitivity_behavior(tmp_path, capsys):
+    """No --sensitivity/--threshold given: effective threshold must be exactly
+    Z_SCORE_THRESHOLD, matching `detect`'s output before --sensitivity existed
+    (backward compatibility)."""
+    log_path = _demo_log(tmp_path, n_normal=200, n_anomalies=10)
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models"), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["sensitivity"] == "normal"
+    assert payload["threshold"] == Z_SCORE_THRESHOLD
+
+
+def test_detect_command_threshold_and_sensitivity_are_mutually_exclusive(tmp_path, capsys):
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "detect",
+                "--log-file",
+                str(log_path),
+                "--threshold",
+                "3.5",
+                "--sensitivity",
+                "high",
+            ]
+        )
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "not allowed with" in captured.err
+
+
+def test_detect_command_threshold_override_keeps_sensitivity_normal_for_other_detectors(tmp_path, capsys):
+    """Using the advanced --threshold escape hatch should not silently affect
+    frequency/cusum -- sensitivity stays "normal" (multiplier 1.0) for them."""
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    main(["detect", "--log-file", str(log_path), "--model-dir", str(tmp_path / "models"), "--json", "--threshold", "1000"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["sensitivity"] == "normal"
+    assert payload["threshold"] == 1000.0
+
+
 def test_detect_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     missing = tmp_path / "does-not-exist.jsonl"
     exit_code = main(["detect", "--log-file", str(missing)])
@@ -640,6 +1138,91 @@ def test_detect_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
 
     assert exit_code == 2
     assert "[llm-burnwatch] error:" in captured.err
+
+
+def test_status_command_reports_learning_and_off_states_for_fresh_log(tmp_path, monkeypatch, capsys):
+    # No budget.json in this throwaway $XDG_CONFIG_HOME -- budget must read
+    # as "off", not pick up a real developer's budget.json.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["status", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "analyzed 5 call(s)" in captured.out
+    assert "frequency: LEARNING" in captured.out
+    assert "cusum" in captured.out and "ON" in captured.out
+    assert "budget" in captured.out and "OFF" in captured.out
+
+
+def test_status_command_json_matches_detector_status_lines(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    exit_code = main(["status", "--log-file", str(log_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["call_count"] == 5
+    by_name = {d["name"]: d["state"] for d in payload["detectors"]}
+    assert by_name == {"frequency": "learning", "cusum": "on", "budget": "off"}
+
+
+def test_status_command_reflects_configured_budget(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = _demo_log(tmp_path, n_normal=5, n_anomalies=0)
+
+    budget_exit = main(["budget", "set", "--monthly", "50", "--warn-at", "0.8"])
+    assert budget_exit == 0
+    capsys.readouterr()
+
+    exit_code = main(["status", "--log-file", str(log_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    by_name = {d["name"]: d for d in payload["detectors"]}
+    assert by_name["budget"]["state"] == "on"
+    assert "50.00" in by_name["budget"]["message"]
+
+
+def test_status_command_missing_log_file_returns_exit_code_2(tmp_path, capsys):
+    missing = tmp_path / "does-not-exist.jsonl"
+    exit_code = main(["status", "--log-file", str(missing)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "[llm-burnwatch] error:" in captured.err
+
+
+def test_status_command_on_empty_log_prints_onboarding(tmp_path, monkeypatch, capsys):
+    # E1: an existing-but-empty log gets the same onboarding steps as
+    # `report`, not a "analyzed 0 call(s)" + meaningless detector states.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = tmp_path / "empty.jsonl"
+    log_path.write_text("")
+
+    exit_code = main(["status", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "has no records yet" in captured.out
+    assert "Log your first call" in captured.out
+    assert "analyzed 0 call(s)" not in captured.out
+
+
+def test_status_command_json_on_empty_log_is_unaffected_by_onboarding(tmp_path, monkeypatch, capsys):
+    # `--json` is a machine contract -- E1's onboarding text is console-only.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = tmp_path / "empty.jsonl"
+    log_path.write_text("")
+
+    exit_code = main(["status", "--log-file", str(log_path), "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["call_count"] == 0
+    assert len(payload["detectors"]) == 3
 
 
 def test_train_command_empty_log_returns_exit_code_2(tmp_path, capsys):
@@ -862,6 +1445,11 @@ def test_core_commands_make_no_network_attempts(tmp_path, monkeypatch, capsys):
     report_exit = main(["report", "--log-file", str(log_path)])
     captured = capsys.readouterr()
     assert report_exit == 0
+    assert "unexpected error" not in captured.err
+
+    status_exit = main(["status", "--log-file", str(log_path)])
+    captured = capsys.readouterr()
+    assert status_exit == 0
     assert "unexpected error" not in captured.err
 
     # No --model-dir with a trained model: latest_version_dir() returns None,

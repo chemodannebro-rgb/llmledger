@@ -1,0 +1,80 @@
+site_name: llm-burnwatch
+site_description: Local, zero-dependency cost tracking and anomaly detection for LLM/agent calls
+repo_url: https://github.com/chemodannebro-rgb/llm-burnwatch
+repo_name: chemodannebro-rgb/llm-burnwatch
+
+# Fail the build (and CI) on any broken internal link or reference to a
+# page missing from `nav` below -- see CONTRIBUTING.md's "Documentation
+# site" section.
+strict: true
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - search.suggest
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: ru
+          name: Русский
+          build: true
+          nav_translations:
+            Quickstart: Быстрый старт
+            Connecting to an existing app: Подключение к существующему приложению
+            Public API: Публичный API
+            Detectors: Детекторы
+            Baseline (z-score): Baseline (z-score)
+            CUSUM (level shift): CUSUM (сдвиг уровня)
+            Frequency (bursts/runaway loops): Частота (всплески/зацикливание)
+            Rules (hard limits): Правила (жёсткие лимиты)
+            Budget: Бюджет
+            budget vs guard(): budget vs guard()
+            Security model: Модель безопасности
+            Performance: Производительность
+            Comparison (Langfuse/Helicone/LiteLLM): Сравнение (Langfuse/Helicone/LiteLLM)
+            FAQ: FAQ
+
+# Unicode-aware heading slugs -- default python-markdown slugify strips
+# non-ASCII characters, which would break every anchor link (e.g. `#faq.ru.md
+# #сообщить-об-уязвимости`) on the Russian pages.
+markdown_extensions:
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+
+nav:
+  - Quickstart: index.md
+  - Connecting to an existing app: connecting.md
+  - Public API: api.md
+  - Detectors:
+      - Baseline (z-score): detectors/baseline.md
+      - CUSUM (level shift): detectors/cusum.md
+      - Frequency (bursts/runaway loops): detectors/frequency.md
+      - Rules (hard limits): detectors/rules.md
+      - Budget: detectors/budget.md
+  - budget vs guard(): budget-vs-guard.md
+  - Security model: security.md
+  - Performance: performance.md
+  - Comparison (Langfuse/Helicone/LiteLLM): comparison.md
+  - FAQ: faq.md

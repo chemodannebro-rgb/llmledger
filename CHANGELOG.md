@@ -2,6 +2,289 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.8] - 2026-07-13
+
+API stabilization: `docs/api.md` is now the one place that says what's
+covered by semver and what isn't, and `CONTRIBUTING.md`'s versioning
+policy is spelled out against it instead of being a one-line promise.
+
+### Added
+- `src/llm_burnwatch/__init__.py` now exports `CostTracker`,
+  `BudgetExceededError`, and `__version__` -- previously only `__version__`
+  was there, so `from llm_burnwatch import CostTracker` didn't work despite
+  being the form shown in `docs/index.md`'s Quickstart.
+- `docs/api.md` (+ `docs/api.ru.md`), linked from `mkdocs.yml`'s nav right
+  after "Connecting to an existing app": the Python API (`CostTracker`'s
+  constructor and 8 methods, `BudgetExceededError`, `__version__`), all 11
+  CLI subcommands with their flags and exit codes, `--json` output keys for
+  `report`/`detect`/`status`/`validate`, and a "Frozen contracts" list
+  (`schema.json`, `alert_schema.json`, `detect --follow`'s NDJSON stream,
+  env var names, CLI subcommand/flag names) versus an explicit "Internal
+  (not covered by semver)" list.
+- `CONTRIBUTING.md`'s `## Versioning` section: a `### Semver commitments`
+  subsection (MAJOR/MINOR/PATCH criteria tied to `docs/api.md`'s frozen
+  vs. internal split) and a `### Deprecation policy` subsection (`warn()`
+  plus a `CHANGELOG.md` entry for at least one minor release before
+  removal, never in the same release that introduced the warning).
+- `tests/test_package.py`: locks in the new top-level exports and
+  `__version__`'s value so a future change to either doesn't slip by
+  unnoticed.
+
+### Fixed
+- `__init__.py`'s `__version__` was `"0.7.0"`, out of lockstep with
+  `pyproject.toml`'s `"0.9.0"` (a drift `ARCHITECTURE.md`'s own Versioning
+  section says shouldn't happen). Since `llm-burnwatch --version` reads
+  this value, it had been printing the stale `0.7.0` -- now prints `0.9.0`,
+  matching `pyproject.toml`.
+
+### Known issue (flagged, not fixed here)
+- `report --rub-rate`'s deprecation warning says "will be removed before
+  v1.0" -- that hasn't happened as part of this release; the flag is still
+  present. Removing a CLI flag is a functional change outside this
+  release's literal scope (`__init__.py`/`docs/api.md`/`CONTRIBUTING.md`/
+  `tests/test_package.py`), so it's left for a follow-up decision rather
+  than done here without being asked.
+
+## [1.0.7] - 2026-07-13
+
+Alert text as a product, not an afterthought: console output, chat sink
+messages, and error messages all get rewritten in money/action language
+instead of statistical jargon and raw enum values, without touching any
+`--json`/NDJSON contract.
+
+### Added
+- Console-only human-readable rendering for `detect`'s text output: cost
+  and usage features are shown as dollar amounts and plain-English feature
+  names instead of `z=`/`MAD=`/`cusum=`/`micros`; each of the 5 alert
+  detectors gets a "type of incident" phrase (e.g. "cost/usage spike",
+  "gradual cost increase", "unusually frequent calls", "rule violated:
+  ...") instead of a raw `detector`/`kind` pair; a terminology-bridge note
+  was added to `docs/detectors/cusum.md`(+ru) explaining that "gradual
+  cost increase" (console) and "level shift" (docs, `Alert.kind`) name the
+  same thing.
+- A next-step hint on every alert type in the console (e.g. pointing at
+  `report --json`, `budget show`, the dashboard, or `--max-call-cost`/
+  `--allowed-models`), without referencing the not-yet-existing `explain`
+  subcommand.
+- A regression-locking jargon linter (5 new tests): runs `detect` against
+  a real triggering scenario for each of the 5 detector types and asserts
+  none of `z=`/`MAD`/`cusum=`/`quantile`/`micros` or a raw snake_case
+  `detector`/`kind` value leaks into console text.
+- `alert_text.py`: the rendering logic above, shared by `detect`'s console
+  output and by `SlackSink`/`TelegramSink`, which now send one readable
+  line per alert (with a severity emoji) instead of
+  `[severity] detector/kind: message`. `WebhookSink`/`ExecSink` are
+  unchanged (they still send the full alert payload for machine
+  consumers). `SECURITY.md` updated to describe the new one-line format
+  precisely -- still plain text, `parse_mode` still unused.
+- A concrete next step on every CLI error message that previously lacked
+  one: a shared `_log_file_not_found_error()` helper (6 call sites) that
+  suggests checking `--log-file` or generating a demo log; specific fixes
+  for `train`'s "nothing to train on" and `validate --alerts`'s file/JSON
+  errors.
+- Onboarding steps (the Quickstart's `log_call` → `report` → `demo-data` →
+  `detect` sequence) shown by `report`/`status` on a genuinely empty log,
+  instead of a bare "no records found" -- kept separate from a *missing*
+  log file, which still exits `2` via the error path above.
+
+### Notes
+- `Alert.message`, `alert_schema_version`, and `detect --follow`'s NDJSON
+  format are all unchanged -- every rewrite above lives in a separate
+  text-rendering layer, not in the `Alert` dataclass or its JSON encoding.
+
+## [1.0.6] - 2026-07-13
+
+Detector status and detection sensitivity become explicit and
+user-controllable instead of implicit in code and flag combinations.
+
+### Added
+- `llm-burnwatch status --log-file <path>`: a new subcommand reporting
+  whether the `frequency`/`cusum`/`budget` detectors are on, off, or still
+  learning, and why (reuses the existing seasonal-coverage message for
+  `frequency`; no new gating logic).
+- `--sensitivity low|normal|high` for `detect`, mutually exclusive with
+  the existing `--threshold`: scales the baseline, frequency, and CUSUM
+  detectors' thresholds together via one multiplier
+  (`SENSITIVITY_MULTIPLIERS` in `anomaly/constants.py`). `detect --json`
+  gains an additive `sensitivity` key; `alert_schema_version` is
+  unchanged.
+- `report` now defaults to the last 30 days instead of all-time; `--all-time`
+  restores the previous behavior. `report --json` gains a `period`
+  key (`{since, until, all_time}`).
+- `CostTracker(log_file=...)`'s `log_file` argument is now optional,
+  defaulting to a new `default_log_path()` (`$XDG_DATA_HOME/llm-burnwatch/log.jsonl`,
+  following the same pattern as the existing pricing/budget config paths
+  under `$XDG_CONFIG_HOME`).
+
+### Notes
+- No existing CLI flag was removed or renamed; `--threshold` keeps working
+  exactly as before when given explicitly (sensitivity multiplier `1.0`).
+
+## [1.0.5] - 2026-07-13
+
+Russian translation of the documentation site with an EN/RU language
+switcher, English staying the default (root URL, no prefix).
+
+### Added
+- `mkdocs-static-i18n` (`docs` optional extra) -- Material for MkDocs'
+  language switcher, contextually linking to the translation of the
+  current page rather than always the other language's root.
+- A `<page>.ru.md` Russian translation alongside every existing English
+  page (12 total): `index`, `connecting`, the five `detectors/*` pages,
+  `security`, `budget-vs-guard`, `performance`, `comparison`, `faq`.
+  Prose is translated; code blocks, CLI commands, function/constant names,
+  numbers and thresholds are left unchanged.
+- `markdown_extensions`' `toc.slugify` set to
+  `pymdownx.slugs.slugify(case="lower")` -- the default slugifier strips
+  non-ASCII characters, which would silently break every anchor link on
+  the Russian pages (e.g. `#сообщить-об-уязвимости`).
+- Fixed a pre-existing broken anchor (`security.md#pricing-import-url-trust-boundary`
+  → `#pricing-import--trust-boundary`) in `connecting.md`, found while
+  verifying anchors on the new Russian pages; the English site's
+  `--strict` build doesn't fail on a missing in-page anchor (only a
+  missing *page*), so this had gone unnoticed.
+
+### Not in scope
+- `README.md` and code docstrings stay English-only -- the user asked for
+  the docs site specifically.
+
+
+Documentation as a product: an mkdocs-material site replacing "read the
+whole README" with one page per topic, editorial work over already-vetted
+source material (docstrings, `SECURITY.md`, `ARCHITECTURE.md`) rather than
+new research.
+
+### Added
+- `docs` optional extra (`mkdocs-material`) -- a build-time tool, not a
+  runtime dependency; `pyproject.toml`'s core `dependencies` stay empty.
+- `mkdocs.yml` with `strict: true` (fails the build on any broken internal
+  link or nav entry pointing at a missing page -- the release plan's
+  "link-checker", scoped to internal links).
+- `docs/index.md`: Quickstart (five minutes to a first alert).
+- `docs/connecting.md`: SDK adapters (OpenAI/Anthropic/Gemini/Ollama/
+  LangChain/LiteLLM) and `import otel`, for an app that already makes LLM
+  calls.
+- `docs/detectors/{baseline,cusum,frequency,rules,budget}.md`: one page per
+  detector -- what it catches, the math, its tunable constants and why
+  they're set where they are, how to tune it, known limitations.
+- `docs/security.md`: a readable version of `SECURITY.md`'s trust
+  boundaries plus `ARCHITECTURE.md`'s network-boundaries table.
+- `docs/budget-vs-guard.md`: `budget`/`BudgetDetector` (cross-process,
+  post-hoc detection) vs `CostTracker.guard()` (in-process, real-time
+  enforcement), side by side with examples.
+- `docs/comparison.md`: llm-burnwatch vs Langfuse/LiteLLM/Helicone -- when
+  to use which, expanding on the README's "When NOT to use" section.
+- `docs/faq.md`: the no-network guarantee, whether prompts/completions are
+  ever stored, and the common reasons an expected alert didn't fire
+  (insufficient data, seasonal coverage not yet reached, cold start).
+- `docs` CI job (`.github/workflows/ci.yml`): `pip install -e ".[docs]"` +
+  `mkdocs build --strict` on every push/PR.
+- README: a "Full documentation" pointer to `docs/index.md`; CONTRIBUTING:
+  a "Documentation site" section on building/previewing locally and adding
+  new pages to `mkdocs.yml`'s nav.
+
+### Notes
+- Publishing the built site (e.g. GitHub Pages) is a separate, later
+  release step -- this only builds it, in CI and locally.
+- External copyediting by a native English speaker remains a manual,
+  human step, same as previous rounds' external-designer/external-editor
+  precedent.
+
+## [1.0.3] - 2026-07-13
+
+Performance with numbers: measured (not assumed) throughput/memory
+behavior against the v1.0 release plan's thresholds, using two new
+dev-only benchmark scripts (`scripts/bench.py`, `scripts/soak_follow.py`
+-- not part of the installed package, not run in CI).
+
+### Added
+- `scripts/bench.py`: times `build_report()` over 1M records, the full
+  detector registry over 1M records (one-shot `detect`) and over a single
+  full `FOLLOW_WINDOW_SIZE` window (one `--follow` poll's dominant cost),
+  and `parse_otel_spans()` over 100k synthetic spans.
+- `scripts/soak_follow.py`: drives thousands of poll-equivalent iterations
+  back-to-back and samples RSS throughout, as an automated stand-in for a
+  real multi-hour `--follow` soak (which remains a manual pre-release step
+  -- see `docs/performance.md`).
+- `docs/performance.md`: methodology, results table, and what the numbers
+  do/don't prove.
+
+### Verified, no code changes needed
+- `report` on 1,000,000 records: 0.82s, well inside the plan's < 5s
+  threshold. No aggregate cache was added -- the plan is explicit that a
+  sidecar cache is only justified once the threshold is actually missed.
+- A single `--follow` poll's full-window detector re-analysis: 0.036s,
+  well inside the < 1s threshold. No memoization was added to the
+  frequency detector's seasonal bucketing -- not warranted given the
+  measured margin.
+- 10,000 poll-equivalent iterations: RSS grew +0.4% (26.5MB -> 26.6MB) --
+  flat, no evidence of a leak.
+
+## [1.0.2] - 2026-07-08
+
+Dashboard 3.0: a modern visual redesign, real sort/filter/copy
+interactivity, and readable dual-currency money formatting. The single
+biggest change in the file's history is the relaxation of the
+"zero-JavaScript" principle: a small amount of inline vanilla JS now
+powers table sorting, live filtering, and one-click copy-to-clipboard --
+still no external library, no CDN, and no network call, so the
+zero-dependency/no-network guarantee is unchanged, it's just no longer
+literally zero-script.
+
+### Changed
+- Money formatting: every dollar amount in the dashboard now renders via
+  `_format_usd()` -- thousands separator + 2 decimals (e.g. `$1,234.57`
+  instead of `$1234.567891`) -- falling back to the old 6-decimal form
+  only when 2 decimals would silently show a real, nonzero micro-cost as
+  `$0.00`. The exact 6-decimal value is never dropped: it's always one
+  click away via a small copy-to-clipboard button next to the amount.
+- Dual-currency display (`--rub-rate`/`--fx-rate --currency`) is no
+  longer limited to the top summary card: every rendered cost -- table
+  rows, the daily journal's per-day cost, the budget block -- now shows
+  the configured currency's amount in parentheses alongside the USD
+  figure.
+- Full CSS redesign: a single indigo accent color (light/dark), CSS-grid
+  summary cards instead of `inline-block`, zebra-striped tables with a
+  sticky header, pill/chip-style anomaly/severity badges, a taller budget
+  bar with the percentage overlaid as text, and a custom disclosure
+  triangle for the daily journal's `<details>` entries (replacing the
+  inconsistent native browser marker).
+- `dashboard.py`'s module docstring updated to describe the new "small
+  amount of inline vanilla JavaScript" relaxation of the former
+  zero-script guarantee.
+
+### Added
+- Table sorting: clicking a `<th>` in the by-label/by-model/active-
+  detectors tables sorts that table's rows by that column (numeric for
+  cost/alert-count columns, alphabetic for name columns), toggling
+  ascending/descending on repeated clicks, with `aria-sort` kept in sync
+  for accessibility.
+- Live filtering: a search box above the by-label table, the by-model
+  table, and the daily journal filters rows/entries by case-insensitive
+  substring match against their text content.
+- Copy-to-clipboard: every rendered money value has a small button that
+  copies its exact (6-decimal) value via `navigator.clipboard.writeText`,
+  with a brief "Copied" visual confirmation; a no-op, not an error, when
+  the Clipboard API is unavailable.
+- Sticky anchor navigation (`<nav class="section-nav">`) linking to the
+  Budget (when configured)/Totals/Active detectors/Daily journal
+  sections, so a long dashboard doesn't require scrolling to navigate.
+
+### Added (tests)
+- `_format_usd()` unit tests covering the thousands-separator case and
+  the small-value fallback (a nonzero micro-cost must never render as
+  `$0.00`).
+- A test asserting the inline `<script>` block contains none of
+  `fetch(`, `XMLHttpRequest`, `http://`, or `https://` -- an explicit,
+  automated guard on the no-network claim, not just a manual assertion.
+- Tests covering: full-precision copy-button `data-copy` attributes,
+  `data-sort`/`data-sort-value`/`aria-sort` markup on sortable columns,
+  `data-filter-target` markup on the three filter inputs, dual-currency
+  amounts appearing in table cells (not just the summary card), and the
+  anchor-navigation links.
+- Re-verified the existing 300 KB size-regression guard still passes
+  with the added CSS/JS.
+
 ## [1.0.1] - 2026-07-08
 
 Dashboard 2.0: brings `dashboard --out file.html` up to the same level of

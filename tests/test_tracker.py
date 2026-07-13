@@ -7,7 +7,29 @@ import stat
 import pytest
 
 from llm_burnwatch.logreader import iter_log_records
-from llm_burnwatch.tracker import CostTracker, load_default_pricing, merge_pricing_overrides
+from llm_burnwatch.tracker import (
+    CostTracker,
+    default_log_path,
+    load_default_pricing,
+    merge_pricing_overrides,
+)
+
+
+def test_default_log_path_uses_xdg_data_home_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    assert default_log_path() == tmp_path / "xdg-data" / "llm-burnwatch" / "log.jsonl"
+
+
+def test_cost_tracker_log_file_defaults_to_xdg_data_home_when_omitted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+
+    tracker = CostTracker()
+    tracker.log_call(label="summarize", model="gpt-4o", input_tokens=1000, output_tokens=200)
+
+    expected_path = tmp_path / "xdg-data" / "llm-burnwatch" / "log.jsonl"
+    assert expected_path.exists()
+    records = list(iter_log_records(expected_path))
+    assert len(records) == 1
 
 
 def test_log_call_basic_and_report(tmp_path):

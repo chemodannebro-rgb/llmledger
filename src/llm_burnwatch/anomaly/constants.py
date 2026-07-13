@@ -132,3 +132,19 @@ MIN_SEASONAL_SPAN_DAYS = 14
 # still have enough of it, while staying small enough to reanalyze every
 # `--poll-interval` without noticeable latency.
 FOLLOW_WINDOW_SIZE = 5000
+
+# `detect --sensitivity low|normal|high`: a small, discrete set of presets
+# that scale Z_SCORE_THRESHOLD/FREQUENCY_Z_THRESHOLD/CUSUM_H_MULTIPLIER
+# together, for users who want "fewer/more alerts" without having to know
+# what a z-score or a MAD is. This does not contradict this file's own
+# "not a matter of taste" policy stated at the top: the three underlying
+# statistical constants stay fixed and principled -- this is a single
+# coarse multiplier applied uniformly across all of them, exposed as three
+# named presets, not a raw tunable float. The advanced `--threshold` escape
+# hatch (unaffected by this dict) still exists for the one detector
+# (baseline) where a user genuinely wants to pick their own number.
+SENSITIVITY_MULTIPLIERS = {
+    "low": 1.3,
+    "normal": 1.0,
+    "high": 0.7,
+}

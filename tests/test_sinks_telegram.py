@@ -54,7 +54,10 @@ def test_send_posts_plain_text_to_telegram_bot_api(monkeypatch):
     assert captured["url"] == "https://api.telegram.org/bot123:ABC-TOKEN/sendMessage"
     assert captured["body"] == {
         "chat_id": "-100987654321",
-        "text": "[critical] rules/call_cost_exceeded: call cost exceeded",
+        "text": (
+            "\U0001f6a8 llm-burnwatch: rule violated: call cost limit exceeded "
+            "-- call cost exceeded (record #3)"
+        ),
     }
 
 

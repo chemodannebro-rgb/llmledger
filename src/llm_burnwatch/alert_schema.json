@@ -17,7 +17,12 @@
     },
     "threshold": {
       "type": "number",
-      "description": "Modified z-score threshold used by the baseline detector for this run (`--threshold`)."
+      "description": "Modified z-score threshold used by the baseline detector for this run, after resolving --threshold/--sensitivity."
+    },
+    "sensitivity": {
+      "type": "string",
+      "enum": ["low", "normal", "high"],
+      "description": "The --sensitivity preset used for this run (default: \"normal\"). Scales the baseline/frequency/cusum detectors' thresholds together; stays \"normal\" when the advanced --threshold escape hatch is used instead."
     },
     "anomaly_count": {
       "type": "integer",

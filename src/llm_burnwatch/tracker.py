@@ -51,6 +51,19 @@ def user_budget_path() -> Path:
     return base / "llm-burnwatch" / "budget.json"
 
 
+def default_log_path() -> Path:
+    """Default call log location used by `CostTracker()` when `log_file` is
+    omitted -- `$XDG_DATA_HOME/llm-burnwatch/log.jsonl` if set, else
+    `~/.local/share/llm-burnwatch/log.jsonl`. Same XDG base directory
+    resolution pattern as `user_pricing_path()`/`user_budget_path()`, but
+    under the *data* (not config) home: unlike pricing/budget, which are
+    user-edited settings, the call log is generated data, which is what
+    XDG_DATA_HOME is for."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    return base / "llm-burnwatch" / "log.jsonl"
+
+
 def resolve_pricing(explicit_path: str | None = None) -> dict:
     """Resolve which pricing.json to use, in priority order:
 
@@ -152,14 +165,21 @@ class CostTracker:
 
     def __init__(
         self,
-        log_file,
+        log_file=None,
         *,
         pricing: dict | None = None,
         pricing_overrides: dict[str, dict] | None = None,
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
     ) -> None:
-        """`pricing`, if given, replaces the built-in `pricing.json` entirely
+        """`log_file`, if omitted, defaults to `default_log_path()`
+        (`$XDG_DATA_HOME/llm-burnwatch/log.jsonl`, or
+        `~/.local/share/llm-burnwatch/log.jsonl`) so a first-time caller can
+        write `CostTracker()` and start logging without picking a path --
+        the CLI (`report`/`detect`/etc., which all require an explicit
+        `--log-file`) can then be pointed at that same default location.
+
+        `pricing`, if given, replaces the built-in `pricing.json` entirely
         (you're responsible for every model you'll log against). For adding
         or overriding just one or two models on top of the built-in rates
         (e.g. a new/unlisted model, or a custom negotiated rate) without
@@ -179,7 +199,7 @@ class CostTracker:
             self.pricing = merge_pricing_overrides(load_default_pricing(), pricing_overrides)
         else:
             self.pricing = pricing if pricing is not None else load_default_pricing()
-        self._read_path = Path(log_file)
+        self._read_path = Path(log_file) if log_file is not None else default_log_path()
         self._write_path = self._resolve_write_path(self._read_path)
         self._guards: dict[str, _GuardState] = {}
 

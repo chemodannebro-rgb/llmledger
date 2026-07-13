@@ -9,7 +9,7 @@ import pytest
 
 from llm_burnwatch.budget import save_budget
 from llm_burnwatch.cli import main
-from llm_burnwatch.dashboard import render_dashboard
+from llm_burnwatch.dashboard import _format_usd, render_dashboard
 from llm_burnwatch.demo_data import write_demo_log
 from llm_burnwatch.tracker import build_report, load_default_pricing, user_budget_path
 
@@ -150,8 +150,14 @@ def test_render_dashboard_rub_rate_shown_when_given():
     with_rate = render_dashboard(records, pricing, rub_rate=90)
     without_rate = render_dashboard(records, pricing)
 
-    assert "~₽90.00 at 90.00 ₽/$" in with_rate
     assert "₽" not in without_rate
+
+    # 1.0.2: dual-currency uses the same `_money_span()` markup everywhere --
+    # the summary card and the by-label/by-model table row for this record's
+    # $1.00 cost must both carry the identical RUB parenthetical (and "₽" not
+    # in without_rate, above, already confirms it's absent everywhere when no
+    # rate is given).
+    assert with_rate.count('<span class="money">$1.00 (₽90.00)') >= 2
 
 
 def test_render_dashboard_includes_viewport_meta_tag():
@@ -380,7 +386,9 @@ def test_render_dashboard_active_detectors_baseline_count_matches_summary_card()
         r'baseline anomalies flagged</div><div class="value">(\d+)', result
     )
     table_match = re.search(
-        r"<td>Baseline \(z-score\)</td><td>enabled</td><td>[^<]*</td><td>(\d+)</td>", result
+        r'<td>Baseline \(z-score\)</td><td>enabled</td><td>[^<]*</td>'
+        r'<td data-sort-value="(\d+)">\d+</td>',
+        result,
     )
     assert card_match is not None
     assert table_match is not None
@@ -449,8 +457,10 @@ def test_render_dashboard_budget_block_three_states(tmp_path):
     with_status = render_dashboard(current_month_record, pricing)
     assert '<div class="budget-bar">' in with_status
     assert "within budget" in with_status
-    assert "month-to-date: $1.00" in with_status
-    assert "budget: $100.00" in with_status
+    assert "month-to-date:" in with_status
+    assert '<span class="money">$1.00' in with_status
+    assert "budget:" in with_status
+    assert '<span class="money">$100.00' in with_status
 
 
 def test_render_dashboard_sparklines_differ_between_labels_with_different_trends():
@@ -511,7 +521,7 @@ def test_render_dashboard_active_detectors_section_lists_all_five():
 
     result = render_dashboard([], pricing)
 
-    assert "<h2>Active detectors</h2>" in result
+    assert '<h2 id="active-detectors">Active detectors</h2>' in result
     assert "Baseline (z-score)" in result
     assert "Frequency" in result
     assert "Level-shift (CUSUM)" in result
@@ -540,3 +550,116 @@ def test_render_dashboard_stays_under_300kb_on_demo_scale_log(tmp_path):
     result = render_dashboard(records, pricing)
 
     assert len(result.encode("utf-8")) < 300_000
+
+
+# --- 1.0.2: Dashboard 3.0 -- design, sort/filter/copy, dual-currency ---------
+
+
+def test_format_usd_thousands_separator_and_small_value_fallback():
+    # Normal amounts: 2 decimals + thousands separator (the readability fix).
+    assert _format_usd(1234.567891) == "$1,234.57"
+    assert _format_usd(0) == "$0.00"
+
+    # A real, nonzero micro-cost that would round away to "$0.00" at 2
+    # decimals must fall back to the old 6-decimal form instead of lying
+    # about it being zero.
+    assert _format_usd(0.0000015) == "$0.000002"
+    assert _format_usd(0.0000015) != "$0.00"
+
+
+def test_render_dashboard_money_cells_carry_full_precision_copy_button():
+    records = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 1_234_567,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    # Readable 2-decimal form is what's shown...
+    assert "$1.23" in result
+    # ...but the exact 6-decimal value is still one click away via the
+    # copy button, never silently dropped.
+    assert 'data-copy="1.234567"' in result
+    assert 'class="copy-btn"' in result
+
+
+def test_render_dashboard_sort_and_filter_markup_present():
+    records = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 100,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    # Sortable column headers, numeric sort key on data-sort-value.
+    assert 'data-sort="text"' in result
+    assert 'data-sort="num"' in result
+    assert 'data-sort-value="0.000100"' in result
+
+    # Filter inputs above the by-label/by-model tables and the journal.
+    assert 'data-filter-target="by-label-table"' in result
+    assert 'data-filter-target="by-model-table"' in result
+    assert 'data-filter-target="journal-list"' in result
+    assert 'id="by-label-table"' in result
+    assert 'id="by-model-table"' in result
+    assert 'id="journal-list"' in result
+
+
+def test_render_dashboard_script_makes_no_network_calls():
+    pricing = load_default_pricing()
+    result = render_dashboard([], pricing)
+
+    script_start = result.index("<script>")
+    script_end = result.index("</script>", script_start)
+    script = result[script_start:script_end]
+
+    assert "fetch(" not in script
+    assert "XMLHttpRequest" not in script
+    assert "http://" not in script
+    assert "https://" not in script
+
+
+def test_render_dashboard_has_anchor_navigation_and_aria_sort():
+    save_budget(user_budget_path(), monthly_usd=100.0, warn_at_fraction=0.8)
+    pricing = load_default_pricing()
+
+    result = render_dashboard([], pricing)
+
+    assert '<nav class="section-nav">' in result
+    assert '<a href="#budget">Budget</a>' in result
+    assert '<a href="#totals">Totals</a>' in result
+    assert '<a href="#active-detectors">Active detectors</a>' in result
+    assert '<a href="#daily-journal">Daily journal</a>' in result
+    assert 'aria-sort="none"' in result
+
+
+def test_render_dashboard_copy_button_has_aria_label():
+    records = [
+        {
+            "label": "x",
+            "model": "gpt-4o",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_micros": 100,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+    pricing = load_default_pricing()
+
+    result = render_dashboard(records, pricing)
+
+    assert 'aria-label="Copy exact value"' in result
