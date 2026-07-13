@@ -112,6 +112,29 @@ webhook sink together against a real local HTTP receiver:
 python examples/e2e_actions_demo.py
 ```
 
+## Log format
+
+Each line of the log is one JSON object; the full contract (required
+fields, types, optional fields like `cached_input_tokens`/`trace_id`) is
+`src/llm_burnwatch/schema.json`, also available via `llm-burnwatch schema`. This is
+the source of truth for any non-Python client (Node.js, Go, ...) that wants
+to write a compatible log — every record also carries `schema_version` for
+future format changes, plus a UTC `timestamp` (ISO 8601) of when the call
+happened.
+
+Every record needs a `label` (your own name for the call site, e.g.
+`"retrieval"`/`"summarize"`) and a `model` identifier as billed, alongside
+`input_tokens`/`output_tokens`/`cost_micros`. An optional free-form `extra`
+object lets you attach your own metadata (e.g. `workflow_id`) without
+changing the schema.
+
+`cost_micros` is an integer (1 micro = $0.000001), not a float dollar
+amount, to avoid rounding a $0.0025 call down to $0.00 and to avoid
+float-accumulation drift when summing a large log.
+
+Reasoning tokens (o1/o3-style models) aren't a separate field — bill them
+into `output_tokens`, at the same rate.
+
 ## Where to go next
 
 - Want detection to catch runaway loops/cost spikes/model swaps as they

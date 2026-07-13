@@ -22,7 +22,7 @@ from llm_burnwatch.cli import (
 )
 from llm_burnwatch.detectors.protocol import Alert
 from llm_burnwatch.demo_data import model_swap, prompt_regression, runaway_loop, write_demo_log
-from llm_burnwatch.tracker import CostTracker
+from llm_burnwatch.tracker import CostTracker, default_log_path
 
 
 def _demo_log(tmp_path, **kwargs):
@@ -107,12 +107,62 @@ def test_validate_command_missing_log_file_returns_exit_code_2(tmp_path, capsys)
     assert "[llm-burnwatch] error:" in captured.err
 
 
-def test_validate_command_without_log_file_or_alerts_returns_exit_code_2(capsys):
+def test_validate_command_without_log_file_or_alerts_uses_default_log_path(
+    tmp_path, monkeypatch, capsys
+):
+    # A2/D4: --log-file is no longer required -- omitting it falls back to
+    # default_log_path() ($XDG_DATA_HOME/llm-burnwatch/log.jsonl), which
+    # doesn't exist in this throwaway XDG_DATA_HOME, so this still exits 2
+    # but via the same FileNotFoundError-with-a-suggestion path as an
+    # explicit missing --log-file, not a "--log-file is required" message.
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+
     exit_code = main(["validate"])
     captured = capsys.readouterr()
 
     assert exit_code == 2
-    assert "--log-file is required unless --alerts is given" in captured.err
+    assert "[llm-burnwatch] error:" in captured.err
+    assert "log path does not exist" in captured.err
+
+
+def test_report_command_without_log_file_falls_back_to_default_log_path(
+    tmp_path, monkeypatch, capsys
+):
+    # A2: report --log-file is optional -- an omitted --log-file resolves
+    # to default_log_path() and is genuinely read from there, not just
+    # accepted and ignored.
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = default_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    write_demo_log(log_path, n_normal=3, n_anomalies=0)
+
+    exit_code = main(["report", "--json", "--all-time"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["call_count"] == 3
+
+
+def test_detect_and_status_commands_without_log_file_fall_back_to_default_log_path(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    log_path = default_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    write_demo_log(log_path, n_normal=200, n_anomalies=10)
+
+    status_exit = main(["status", "--json"])
+    captured = capsys.readouterr()
+    assert status_exit == 0
+    assert json.loads(captured.out)["call_count"] == 210
+
+    detect_exit = main(["detect", "--json"])
+    captured = capsys.readouterr()
+    assert detect_exit == 1  # anomalies present, same as the explicit --log-file case
+    assert json.loads(captured.out)
 
 
 def test_validate_alerts_on_valid_alert_json_reports_valid(tmp_path, capsys):

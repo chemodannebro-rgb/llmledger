@@ -104,7 +104,13 @@ from .sinks.protocol import send_to_all
 from .sinks.slack_sink import SlackSink
 from .sinks.telegram_sink import TelegramSink
 from .sinks.webhook_sink import WebhookSink
-from .tracker import build_report, resolve_pricing, user_budget_path, user_pricing_path
+from .tracker import (
+    build_report,
+    default_log_path,
+    resolve_pricing,
+    user_budget_path,
+    user_pricing_path,
+)
 
 DISCLAIMER = (
     "llm-burnwatch is a diagnostic aid, not a guarantee: it flags statistically "
@@ -329,6 +335,9 @@ _DEFAULT_REPORT_WINDOW_DAYS = 30
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
+
     if args.json and args.format == "csv":
         error("--json and --format csv are mutually exclusive")
         return 2
@@ -468,6 +477,9 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def cmd_dashboard(args: argparse.Namespace) -> int:
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
+
     try:
         fx_rate, currency, fx_legacy = _resolve_fx(args)
     except _FxError as exc:
@@ -761,6 +773,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     since its purpose is to answer "what would detect do right now", not
     to let a user preview an override.
     """
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
+
     try:
         records = list(iter_log_records(args.log_file))
     except FileNotFoundError as exc:
@@ -800,6 +815,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_detect(args: argparse.Namespace) -> int:
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
+
     if args.follow:
         if args.json:
             warn(
@@ -1177,6 +1195,9 @@ def _contamination_type(value: str):
 
 
 def cmd_train(args: argparse.Namespace) -> int:
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
+
     try:
         from .anomaly.train import train as train_model
     except ImportError:
@@ -1254,6 +1275,8 @@ def cmd_pricing_import(args: argparse.Namespace) -> int:
 
 
 def cmd_import_otel(args: argparse.Namespace) -> int:
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
     dest = Path(args.log_file)
     try:
         records = import_otel(args.source, dest)
@@ -1298,9 +1321,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if args.alerts:
         return _cmd_validate_alerts(args)
 
-    if not args.log_file:
-        error("--log-file is required unless --alerts is given")
-        return 2
+    if args.log_file is None:
+        args.log_file = str(default_log_path())
 
     from importlib import resources
 
@@ -1400,7 +1422,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     report_p = subparsers.add_parser("report", help="Summarize cost from a log file")
-    report_p.add_argument("--log-file", required=True)
+    report_p.add_argument(
+        "--log-file",
+        default=None,
+        help="Defaults to the same location CostTracker() writes to when its own "
+        "log_file argument is omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
+    )
     report_p.add_argument(
         "--pricing-file", default=None, help="Override pricing.json with a custom file"
     )
@@ -1467,7 +1495,13 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard_p = subparsers.add_parser(
         "dashboard", help="Write a static HTML cost dashboard from a log file"
     )
-    dashboard_p.add_argument("--log-file", required=True)
+    dashboard_p.add_argument(
+        "--log-file",
+        default=None,
+        help="Defaults to the same location CostTracker() writes to when its own "
+        "log_file argument is omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
+    )
     dashboard_p.add_argument("--out", required=True)
     dashboard_p.add_argument(
         "--pricing-file", default=None, help="Override pricing.json with a custom file"
@@ -1515,7 +1549,13 @@ def build_parser() -> argparse.ArgumentParser:
     demo_p.set_defaults(handler=cmd_demo_data)
 
     detect_p = subparsers.add_parser("detect", help="Detect anomalous calls in a log")
-    detect_p.add_argument("--log-file", required=True)
+    detect_p.add_argument(
+        "--log-file",
+        default=None,
+        help="Defaults to the same location CostTracker() writes to when its own "
+        "log_file argument is omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
+    )
     sensitivity_group = detect_p.add_mutually_exclusive_group()
     sensitivity_group.add_argument(
         "--threshold",
@@ -1659,7 +1699,13 @@ def build_parser() -> argparse.ArgumentParser:
     train_p = subparsers.add_parser(
         "train", help="Train an anomaly-detection model (requires scikit-learn)"
     )
-    train_p.add_argument("--log-file", required=True)
+    train_p.add_argument(
+        "--log-file",
+        default=None,
+        help="Defaults to the same location CostTracker() writes to when its own "
+        "log_file argument is omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
+    )
     train_p.add_argument("--model-dir", default="models")
     train_p.add_argument("--keep-last", type=int, default=KEEP_LAST_DEFAULT)
     train_p.add_argument("--contamination", type=_contamination_type, default=CONTAMINATION)
@@ -1672,7 +1718,13 @@ def build_parser() -> argparse.ArgumentParser:
         "status",
         help="Show which detectors are on/off/learning for a log, without running detection",
     )
-    status_p.add_argument("--log-file", required=True)
+    status_p.add_argument(
+        "--log-file",
+        default=None,
+        help="Defaults to the same location CostTracker() writes to when its own "
+        "log_file argument is omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
+    )
     status_p.add_argument(
         "--json", action="store_true", help="Print a machine-readable JSON summary"
     )
@@ -1684,7 +1736,10 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p.add_argument(
         "--log-file",
         default=None,
-        help="Required unless --alerts is given",
+        help="Ignored with --alerts. Otherwise defaults to the same location "
+        "CostTracker() writes to when its own log_file argument is omitted "
+        "($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
     )
     validate_p.add_argument(
         "--json", action="store_true", help="Print a machine-readable JSON summary"
@@ -1756,7 +1811,12 @@ def build_parser() -> argparse.ArgumentParser:
         "source", help="Local file path to an OTLP JSON/JSONL trace export"
     )
     import_otel_p.add_argument(
-        "--log-file", required=True, help="llm-burnwatch log file to append the imported calls to"
+        "--log-file",
+        default=None,
+        help="llm-burnwatch log file to append the imported calls to. Defaults to the "
+        "same location CostTracker() writes to when its own log_file argument is "
+        "omitted ($XDG_DATA_HOME/llm-burnwatch/log.jsonl, or "
+        "~/.local/share/llm-burnwatch/log.jsonl)",
     )
     import_otel_p.set_defaults(handler=cmd_import_otel)
 

@@ -23,6 +23,11 @@ def _isolated_xdg_config(tmp_path, monkeypatch):
     # isolation `test_cli_budget.py` already applies to budget-related CLI
     # tests.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    # `dashboard --log-file` is no longer required -- an omitted --log-file
+    # now falls back to default_log_path() ($XDG_DATA_HOME/llm-burnwatch/
+    # log.jsonl). Isolate that too, so a test that omits --log-file never
+    # reads (or is affected by) the real developer's own log.
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
 
 
 def _write_records(log_path, records):
@@ -338,14 +343,24 @@ def test_dashboard_cli_missing_log_file_returns_exit_code_2(tmp_path, capsys):
     assert not out_path.exists()
 
 
-def test_dashboard_cli_requires_log_file_and_out_arguments(tmp_path, capsys):
-    with pytest.raises(SystemExit) as exc_info:
-        main(["dashboard", "--out", str(tmp_path / "dash.html")])
-    assert exc_info.value.code == 2
-
+def test_dashboard_cli_requires_out_argument(tmp_path, capsys):
     with pytest.raises(SystemExit) as exc_info:
         main(["dashboard", "--log-file", str(tmp_path / "demo.jsonl")])
     assert exc_info.value.code == 2
+
+
+def test_dashboard_cli_without_log_file_falls_back_to_default_log_path(tmp_path, capsys):
+    # A2/D4: --log-file is no longer required -- omitting it resolves to
+    # default_log_path(), which doesn't exist in this test's isolated
+    # $XDG_DATA_HOME, so this returns (not raises) exit code 2 via the
+    # same FileNotFoundError-with-a-suggestion path as an explicit missing
+    # --log-file, not an argparse "required" SystemExit.
+    exit_code = main(["dashboard", "--out", str(tmp_path / "dash.html")])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "[llm-burnwatch] error:" in captured.err
+    assert "log path does not exist" in captured.err
 
 
 # --- 1.0.1: Dashboard 2.0 -----------------------------------------------------

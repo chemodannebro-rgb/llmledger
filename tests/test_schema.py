@@ -125,15 +125,19 @@ def test_record_with_unknown_field_fails_schema(schema):
         jsonschema.validate(record, schema)
 
 
-def test_readme_log_format_section_mentions_all_schema_fields(schema):
-    # Guards against the schema and README silently drifting apart: every
+def test_connecting_doc_log_format_section_mentions_all_schema_fields(schema):
+    # Guards against the schema and docs silently drifting apart: every
     # field name in schema.json's `properties` must appear somewhere in
-    # README's "## Log format" section, so a newly added/renamed field
-    # doesn't go unmentioned in the human-facing docs.
-    readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    start = readme_text.index("## Log format")
-    end = readme_text.index("\n## ", start + 1)
-    section = readme_text[start:end]
+    # docs/connecting.md's "## Log format" section, so a newly added/renamed
+    # field doesn't go unmentioned in the human-facing docs. This section
+    # moved out of README.md (now an "entry point, not reference" style
+    # page per README's own "Full documentation" link) and into
+    # docs/connecting.md, which is where a non-Python client author writing
+    # a compatible log actually looks.
+    doc_text = (REPO_ROOT / "docs" / "connecting.md").read_text(encoding="utf-8")
+    start = doc_text.index("## Log format")
+    end = doc_text.index("\n## ", start + 1)
+    section = doc_text[start:end]
 
     for name in schema["properties"]:
-        assert name in section, f"{name!r} not mentioned in README's Log format section"
+        assert name in section, f"{name!r} not mentioned in docs/connecting.md's Log format section"

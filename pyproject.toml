@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-burnwatch"
-version = "0.9.0"
+version = "1.0.9"
 description = "Local, zero-dependency cost tracking and anomaly detection for LLM/agent calls"
 readme = "README.md"
 license = { text = "MIT" }

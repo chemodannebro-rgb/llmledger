@@ -47,8 +47,8 @@ which is a process concern (e.g. code review on the diff introducing a new
 resolve. `load_model()` prints a warning to this effect every time it loads
 a model, as a reminder to only load registries from a source you trust.
 
-See also the [System boundaries](README.md#system-boundaries) section of
-the README for `llm-burnwatch`'s no-network-calls guarantee.
+See also [Network/process boundaries at a glance](docs/security.md#networkprocess-boundaries-at-a-glance)
+for `llm-burnwatch`'s no-network-calls guarantee.
 
 ## `pricing import <url>` network trust boundary
 

@@ -2,6 +2,83 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.9] - 2026-07-13
+
+Follow-up audit fixes: the CLI's `--log-file` flag catches up to the
+Python API's already-optional `CostTracker()`, the version number
+finally matches the project's actual released state, and `README.md`
+is rewritten as a short entry point instead of a second copy of the
+reference docs.
+
+### Added
+- `--log-file` is now optional on all 7 CLI subcommands that take it
+  (`report`, `dashboard`, `detect`, `train`, `status`, `validate`,
+  `import otel`) -- an omitted `--log-file` resolves via the same
+  `default_log_path()` (`$XDG_DATA_HOME/llm-burnwatch/log.jsonl`) that
+  `CostTracker()` has used since 1.0.6, so the CLI and the Python API no
+  longer disagree about where the log lives by default. `cmd_validate`'s
+  old "log-file or --alerts is required" hard error is replaced by the
+  same default-resolution the other 6 subcommands use.
+- `README.ru.md`: a Russian translation of the new `README.md` (below)
+  -- didn't exist before this release.
+- `docs/connecting.md` (+ `docs/connecting.ru.md`) gained a "Log format"
+  section (moved here, not duplicated, from the old `README.md` -- see
+  "Changed" below).
+- `tests/test_cli.py`: two new tests
+  (`test_report_command_without_log_file_falls_back_to_default_log_path`,
+  `test_detect_and_status_commands_without_log_file_fall_back_to_default_log_path`)
+  covering the new optional `--log-file` behavior end-to-end (isolated
+  `XDG_DATA_HOME`/`XDG_CONFIG_HOME`, a real demo log written to the
+  resolved default path, `report`/`status`/`detect` all reading it back
+  correctly with no `--log-file` given).
+
+### Changed
+- `README.md` rewritten from a 439-line detailed reference into a
+  137-line "entry point, not reference" page: a short pitch, "is this
+  for you?", install, a 5-step quickstart, and a table pointing into
+  `docs/*.md` for everything else -- instead of duplicating detail that
+  already lives (and can drift) in the docs site. Both `CostTracker()`
+  calls in the quickstart now use the default log path (no explicit
+  filename), and the `status`/`report`/`detect` steps no longer pass
+  `--log-file` now that it's optional -- consistent with the fact that
+  everything in the quickstart shares the one default log.
+  `README.ru.md` (new, see "Added") mirrors the same rewrite.
+- The "Log format" section that used to live in `README.md` (schema
+  field list, `cost_micros` being an integer micros count, reasoning
+  tokens billed into `output_tokens`) moved to `docs/connecting.md`
+  (+ a new Russian translation in `docs/connecting.ru.md`) -- the page
+  aimed at non-Python client authors who actually need it, rather than
+  being lost when `README.md` was shortened.
+
+### Fixed
+- `pyproject.toml`'s and `__init__.py`'s `version`/`__version__` were
+  both stuck at `"0.9.0"` despite the project actually being at 1.0.8 --
+  1.0.8's own fix only closed the gap between the two files, it never
+  caught that `pyproject.toml` itself was stale (nothing in
+  `tests/test_package.py` checks the version against the CHANGELOG, only
+  that the two files agree with each other). Both now read `"1.0.9"`,
+  and `llm-burnwatch --version` prints it correctly.
+- `SECURITY.md` linked to `README.md#system-boundaries`, a section that
+  no longer exists after the `README.md` rewrite above. Repointed to
+  `docs/security.md#networkprocess-boundaries-at-a-glance`, the
+  equivalent section in the docs site.
+- `tests/test_schema.py`'s schema/docs drift guard
+  (`test_readme_log_format_section_mentions_all_schema_fields`) read
+  `README.md`'s "Log format" section, which no longer exists there --
+  renamed to `test_connecting_doc_log_format_section_mentions_all_schema_fields`
+  and repointed at `docs/connecting.md`'s new "Log format" section (see
+  "Changed" above), so the drift guard keeps working against the
+  section's new home instead of silently passing vacuously or failing.
+
+### Known issue (flagged, not fixed here)
+- `report --rub-rate`'s deprecation warning still says "will be removed
+  before v1.0" (carried over from 1.0.8, still not acted on this
+  release either).
+- The `SECURITY.md` anchor fix above is reasoned from GitHub's own
+  header-slugification rules (`/` is stripped without a separator), not
+  verified against GitHub's actual rendering -- `mkdocs build --strict`
+  doesn't cover it since `SECURITY.md` isn't part of the mkdocs nav.
+
 ## [1.0.8] - 2026-07-13
 
 API stabilization: `docs/api.md` is now the one place that says what's
